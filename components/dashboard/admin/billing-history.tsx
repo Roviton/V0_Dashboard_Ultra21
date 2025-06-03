@@ -3,132 +3,82 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Download, Eye } from "lucide-react"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-
-const invoices = [
-  {
-    id: "INV-2025-001",
-    date: "2025-01-01",
-    amount: 299.0,
-    status: "paid",
-    period: "January 2025",
-    dueDate: "2025-01-15",
-  },
-  {
-    id: "INV-2024-012",
-    date: "2024-12-01",
-    amount: 299.0,
-    status: "paid",
-    period: "December 2024",
-    dueDate: "2024-12-15",
-  },
-  {
-    id: "INV-2024-011",
-    date: "2024-11-01",
-    amount: 299.0,
-    status: "paid",
-    period: "November 2024",
-    dueDate: "2024-11-15",
-  },
-  {
-    id: "INV-2024-010",
-    date: "2024-10-01",
-    amount: 299.0,
-    status: "paid",
-    period: "October 2024",
-    dueDate: "2024-10-15",
-  },
-  {
-    id: "INV-2024-009",
-    date: "2024-09-01",
-    amount: 299.0,
-    status: "paid",
-    period: "September 2024",
-    dueDate: "2024-09-15",
-  },
-]
+import { Download } from "lucide-react"
 
 export function BillingHistory() {
+  const invoices = [
+    {
+      id: "INV-2024-001",
+      date: "2024-01-15",
+      amount: 299,
+      status: "paid",
+      description: "Professional Plan - January 2024",
+    },
+    {
+      id: "INV-2023-012",
+      date: "2023-12-15",
+      amount: 299,
+      status: "paid",
+      description: "Professional Plan - December 2023",
+    },
+    {
+      id: "INV-2023-011",
+      date: "2023-11-15",
+      amount: 299,
+      status: "paid",
+      description: "Professional Plan - November 2023",
+    },
+    {
+      id: "INV-2023-010",
+      date: "2023-10-15",
+      amount: 99,
+      status: "paid",
+      description: "Starter Plan - October 2023",
+    },
+  ]
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "paid":
-        return <Badge className="bg-green-100 text-green-800">Paid</Badge>
+        return <Badge variant="default">Paid</Badge>
       case "pending":
-        return <Badge className="bg-yellow-100 text-yellow-800">Pending</Badge>
-      case "overdue":
-        return <Badge className="bg-red-100 text-red-800">Overdue</Badge>
+        return <Badge variant="secondary">Pending</Badge>
+      case "failed":
+        return <Badge variant="destructive">Failed</Badge>
       default:
-        return <Badge variant="secondary">{status}</Badge>
+        return <Badge variant="outline">{status}</Badge>
     }
   }
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Billing History</CardTitle>
-          <CardDescription>View and download your past invoices</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Invoice</TableHead>
-                <TableHead>Billing Period</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {invoices.map((invoice) => (
-                <TableRow key={invoice.id}>
-                  <TableCell className="font-medium">{invoice.id}</TableCell>
-                  <TableCell>{invoice.period}</TableCell>
-                  <TableCell>{new Date(invoice.date).toLocaleDateString()}</TableCell>
-                  <TableCell>${invoice.amount.toFixed(2)}</TableCell>
-                  <TableCell>{getStatusBadge(invoice.status)}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end space-x-2">
-                      <Button variant="ghost" size="sm">
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm">
-                        <Download className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Payment Summary</CardTitle>
-          <CardDescription>Your payment history at a glance</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="text-center p-4 border rounded-lg">
-              <p className="text-2xl font-bold text-green-600">$1,495</p>
-              <p className="text-sm text-muted-foreground">Total Paid (Last 5 months)</p>
+    <Card>
+      <CardHeader>
+        <CardTitle>Billing History</CardTitle>
+        <CardDescription>Your recent invoices and payment history</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-4">
+          {invoices.map((invoice) => (
+            <div key={invoice.id} className="flex items-center justify-between p-4 border rounded-lg">
+              <div className="space-y-1">
+                <p className="font-medium">{invoice.id}</p>
+                <p className="text-sm text-muted-foreground">{invoice.description}</p>
+                <p className="text-xs text-muted-foreground">{invoice.date}</p>
+              </div>
+              <div className="flex items-center space-x-4">
+                <div className="text-right">
+                  <p className="font-medium">${invoice.amount}</p>
+                  {getStatusBadge(invoice.status)}
+                </div>
+                <Button variant="outline" size="sm">
+                  <Download className="h-4 w-4 mr-2" />
+                  Download
+                </Button>
+              </div>
             </div>
-            <div className="text-center p-4 border rounded-lg">
-              <p className="text-2xl font-bold">$299</p>
-              <p className="text-sm text-muted-foreground">Average Monthly</p>
-            </div>
-            <div className="text-center p-4 border rounded-lg">
-              <p className="text-2xl font-bold text-blue-600">$299</p>
-              <p className="text-sm text-muted-foreground">Next Payment</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   )
 }

@@ -9,22 +9,25 @@ import { BillingHistory } from "./billing-history"
 export function BillingDashboard() {
   return (
     <div className="space-y-6">
-      <BillingOverview />
-
-      <Tabs defaultValue="usage" className="space-y-4">
+      <Tabs defaultValue="overview" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="usage">Usage & Metrics</TabsTrigger>
-          <TabsTrigger value="plans">Subscription Plans</TabsTrigger>
-          <TabsTrigger value="payment">Payment Methods</TabsTrigger>
-          <TabsTrigger value="history">Billing History</TabsTrigger>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="plans">Plans</TabsTrigger>
+          <TabsTrigger value="usage">Usage</TabsTrigger>
+          <TabsTrigger value="payment">Payment</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="usage" className="space-y-4">
-          <UsageMetrics />
+        <TabsContent value="overview" className="space-y-4">
+          <BillingOverview />
         </TabsContent>
 
         <TabsContent value="plans" className="space-y-4">
           <SubscriptionPlans />
+        </TabsContent>
+
+        <TabsContent value="usage" className="space-y-4">
+          <UsageMetrics />
         </TabsContent>
 
         <TabsContent value="payment" className="space-y-4">
