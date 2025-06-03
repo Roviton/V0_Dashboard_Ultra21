@@ -1,6 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { extractBillOfLadingData } from "@/lib/ai-service"
-import { convertPdfToImages, convertPdfToBase64 } from "@/lib/pdf-processor"
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,70 +32,27 @@ export async function POST(request: NextRequest) {
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
 
-    let dataUrls: string[] = []
-    let processingMethod = "image"
+    // Create data URL based on file type
+    let dataUrl: string
+    let processingMethod: string
 
     if (file.type === "application/pdf") {
-      try {
-        console.log("Processing PDF file...")
-        processingMethod = "pdf-to-image"
-
-        // Convert PDF to images
-        dataUrls = await convertPdfToImages(buffer)
-        console.log(`PDF converted to ${dataUrls.length} images`)
-
-        if (dataUrls.length === 0) {
-          throw new Error("PDF conversion failed - no images generated")
-        }
-      } catch (pdfError) {
-        console.error("PDF processing error:", pdfError)
-
-        // Fallback: Try direct base64 approach
-        try {
-          console.log("Falling back to direct PDF base64 approach...")
-          processingMethod = "pdf-direct"
-          const pdfBase64 = convertPdfToBase64(buffer)
-
-          return NextResponse.json(
-            {
-              success: false,
-              error:
-                "PDF processing requires conversion to images. Please convert your PDF to an image format (PNG, JPG) for best results.",
-              suggestion: "Take a screenshot of your PDF or use an online PDF-to-image converter.",
-              isPdfError: true,
-            },
-            { status: 400 },
-          )
-        } catch (fallbackError) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: `PDF processing failed: ${pdfError instanceof Error ? pdfError.message : "Unknown error"}. Please try converting to an image first.`,
-            },
-            { status: 500 },
-          )
-        }
-      }
-    } else {
-      // Handle image files
+      // For PDFs, create PDF data URL for OpenAI
       const base64 = buffer.toString("base64")
-      const mimeType = file.type
-      dataUrls = [`data:${mimeType};base64,${base64}`]
+      dataUrl = `data:application/pdf;base64,${base64}`
+      processingMethod = "pdf-native"
+      console.log("Processing PDF with native OpenAI support...")
+    } else {
+      // For images, create image data URL
+      const base64 = buffer.toString("base64")
+      dataUrl = `data:${file.type};base64,${base64}`
+      processingMethod = "image"
+      console.log("Processing image file...")
     }
 
-    if (dataUrls.length === 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "No data extracted from file",
-        },
-        { status: 500 },
-      )
-    }
-
-    // Process the first image/page
+    // Process with AI
     console.log(`Extracting data using ${processingMethod} method...`)
-    const result = await extractBillOfLadingData(dataUrls[0])
+    const result = await extractBillOfLadingData(dataUrl)
 
     if (result.success) {
       return NextResponse.json({
@@ -105,8 +61,7 @@ export async function POST(request: NextRequest) {
         usedFallback: result.usedFallback || false,
         message: `Document processed successfully (${processingMethod})`,
         fileType: file.type,
-        processingMethod,
-        pagesProcessed: dataUrls.length,
+        processingMethod: result.processingMethod,
       })
     } else {
       return NextResponse.json(
@@ -115,7 +70,6 @@ export async function POST(request: NextRequest) {
           error: result.error || "Failed to extract data from document",
           originalError: result.originalError,
           rawResponse: result.rawResponse,
-          processingMethod,
         },
         { status: 500 },
       )

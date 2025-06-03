@@ -4,9 +4,11 @@ import { useState, useRef, useEffect } from "react"
 import { LoadsDataTable, type Load } from "@/components/dashboard/loads-data-table"
 import { DashboardStats } from "@/components/dashboard/dashboard-stats"
 import { DashboardFilters } from "@/components/dashboard/dashboard-filters"
-import { NewLoadModal } from "@/components/dashboard/modals/new-load-modal"
+import { EnhancedNewLoadModal } from "@/components/dashboard/modals/enhanced-new-load-modal"
 import { useAuth } from "@/contexts/auth-context"
 import { useRouter } from "next/navigation"
+// Import the AIInsightsCard component
+import { AIInsightsCard } from "@/components/dashboard/ai-insights-card"
 
 export default function DashboardPage() {
   const [showNewLoadModal, setShowNewLoadModal] = useState(false)
@@ -35,10 +37,15 @@ export default function DashboardPage() {
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
       </div>
       <DashboardStats />
+      <AIInsightsCard />
 
       <DashboardFilters onNewLoad={() => setShowNewLoadModal(true)} />
       <LoadsDataTable ref={loadsDataTableRef} isDashboard={true} />
-      <NewLoadModal isOpen={showNewLoadModal} onClose={() => setShowNewLoadModal(false)} onAddLoad={handleAddNewLoad} />
+      <EnhancedNewLoadModal
+        isOpen={showNewLoadModal}
+        onClose={() => setShowNewLoadModal(false)}
+        onSubmit={handleAddNewLoad}
+      />
     </div>
   )
 }

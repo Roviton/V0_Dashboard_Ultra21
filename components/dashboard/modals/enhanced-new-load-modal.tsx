@@ -16,10 +16,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
 import { Upload, Loader2, CheckCircle2, AlertCircle, Wand2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { extractBillOfLadingData } from "@/lib/ai-service"
 
 interface EnhancedNewLoadModalProps {
   isOpen: boolean
@@ -38,25 +38,69 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   const [imageUrl, setImageUrl] = useState("")
   const [extractedData, setExtractedData] = useState<any>(null)
   const [formData, setFormData] = useState({
+    // Basic Load Information
     reference: "",
+    loadNumber: "",
     customer: "",
-    origin: "",
-    destination: "",
+    brokerEmail: "",
+    brokerPhone: "",
+
+    // Origin Information
+    originAddress: "",
+    originCity: "",
+    originState: "",
+    originZip: "",
     pickupDate: "",
+    pickupTime: "",
+    pickupContact: "",
+    pickupPhone: "",
+
+    // Destination Information
+    destinationAddress: "",
+    destinationCity: "",
+    destinationState: "",
+    destinationZip: "",
     deliveryDate: "",
-    rate: "",
-    weight: "",
+    deliveryTime: "",
+    deliveryContact: "",
+    deliveryPhone: "",
+
+    // Load Details
     commodity: "",
+    weight: "",
+    pieces: "",
+    dimensions: "",
     equipment: "",
+    rate: "",
+    mileage: "",
+
+    // Driver Information
+    driverName: "",
+    driverPhone: "",
+    driverEmail: "",
+
+    // Additional Information
+    specialInstructions: "",
     notes: "",
+    hazmat: false,
+    temperature: "",
+    vin: "",
   })
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { id, value, type } = e.target
     setFormData((prev) => ({
       ...prev,
-      [e.target.id]: e.target.value,
+      [id]: type === "checkbox" ? (e.target as HTMLInputElement).checked : value,
+    }))
+  }
+
+  const handleSelectChange = (field: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value,
     }))
   }
 
@@ -88,40 +132,80 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     setStatusMessage("Extracting load details from document...")
 
     try {
-      const result = await extractBillOfLadingData(dataUrl)
+      console.log("Sending document to API for processing...")
+
+      const response = await fetch("/api/ai/extract-document", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ dataUrl }),
+      })
+
+      const result = await response.json()
+      console.log("API response:", result)
 
       if (result.success && result.data) {
         setExtractedData(result.data)
 
-        // Auto-fill form with extracted data
+        // Enhanced data mapping with more comprehensive field extraction
         setFormData((prev) => ({
           ...prev,
+          // Basic Information
           reference: result.data.loadNumber || prev.reference,
-          customer: result.data.consignee?.name || prev.customer,
-          origin: result.data.shipper
-            ? `${result.data.shipper.city || ""}, ${result.data.shipper.state || ""}`.trim().replace(/^,\s*/, "")
-            : prev.origin,
-          destination: result.data.consignee
-            ? `${result.data.consignee.city || ""}, ${result.data.consignee.state || ""}`.trim().replace(/^,\s*/, "")
-            : prev.destination,
+          loadNumber: result.data.loadNumber || prev.loadNumber,
+          customer: result.data.broker?.name || result.data.consignee?.name || prev.customer,
+          brokerEmail: result.data.broker?.email || prev.brokerEmail,
+          brokerPhone: result.data.broker?.phone || prev.brokerPhone,
+
+          // Origin/Pickup Information
+          originAddress: result.data.pickupLocation?.address || prev.originAddress,
+          originCity: result.data.pickupLocation?.city || prev.originCity,
+          originState: result.data.pickupLocation?.state || prev.originState,
+          originZip: result.data.pickupLocation?.zip || prev.originZip,
+          pickupDate: result.data.pickupDate || prev.pickupDate,
+          pickupTime: extractTimeFromDate(result.data.pickupDate) || prev.pickupTime,
+
+          // Destination/Delivery Information
+          destinationAddress: result.data.deliveryLocation?.address || prev.destinationAddress,
+          destinationCity: result.data.deliveryLocation?.city || prev.destinationCity,
+          destinationState: result.data.deliveryLocation?.state || prev.destinationState,
+          destinationZip: result.data.deliveryLocation?.zip || prev.destinationZip,
+          deliveryDate: result.data.deliveryDate || prev.deliveryDate,
+          deliveryTime: extractTimeFromDate(result.data.deliveryDate) || prev.deliveryTime,
+
+          // Load Details
           commodity: result.data.commodity || prev.commodity,
           weight: result.data.weight ? `${result.data.weight} lbs` : prev.weight,
           rate: result.data.rate ? `$${result.data.rate}` : prev.rate,
+          vin: result.data.vin || prev.vin,
+
+          // Driver Information
+          driverName: result.data.driver?.name || prev.driverName,
+          driverPhone: result.data.driver?.phone || prev.driverPhone,
+
+          // Additional Information
+          specialInstructions: result.data.specialInstructions || prev.specialInstructions,
           notes: result.data.specialInstructions || prev.notes,
         }))
 
         setProcessingStatus("success")
-        setStatusMessage("Document processed successfully! Review and edit the extracted data.")
+        setStatusMessage(
+          result.note
+            ? `${result.note} - Review and edit the data below.`
+            : "Document processed successfully! Review and edit the extracted data.",
+        )
         setActiveTab("review")
 
         toast({
           title: "OCR Success",
-          description: "Load details extracted from document",
+          description: result.note || "Load details extracted from document",
         })
       } else {
         throw new Error(result.error || "Failed to extract data")
       }
     } catch (error) {
+      console.error("Document processing error:", error)
       setProcessingStatus("error")
       setStatusMessage(error instanceof Error ? error.message : "Failed to process document")
       toast({
@@ -129,6 +213,17 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
         description: "Could not extract data from document. Please enter details manually.",
         variant: "destructive",
       })
+    }
+  }
+
+  const extractTimeFromDate = (dateString: string | null): string => {
+    if (!dateString) return ""
+    try {
+      const date = new Date(dateString)
+      if (isNaN(date.getTime())) return ""
+      return date.toTimeString().slice(0, 5) // HH:MM format
+    } catch {
+      return ""
     }
   }
 
@@ -172,7 +267,23 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   }
 
   const handleSubmit = () => {
-    onSubmit(formData)
+    // Combine address fields for backward compatibility
+    const processedData = {
+      ...formData,
+      origin: `${formData.originAddress}, ${formData.originCity}, ${formData.originState} ${formData.originZip}`.trim(),
+      destination:
+        `${formData.destinationAddress}, ${formData.destinationCity}, ${formData.destinationState} ${formData.destinationZip}`.trim(),
+      pickupDateTime:
+        formData.pickupDate && formData.pickupTime
+          ? `${formData.pickupDate}T${formData.pickupTime}`
+          : formData.pickupDate,
+      deliveryDateTime:
+        formData.deliveryDate && formData.deliveryTime
+          ? `${formData.deliveryDate}T${formData.deliveryTime}`
+          : formData.deliveryDate,
+    }
+
+    onSubmit(processedData)
     resetForm()
     onClose()
   }
@@ -186,22 +297,359 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     setExtractedData(null)
     setFormData({
       reference: "",
+      loadNumber: "",
       customer: "",
-      origin: "",
-      destination: "",
+      brokerEmail: "",
+      brokerPhone: "",
+      originAddress: "",
+      originCity: "",
+      originState: "",
+      originZip: "",
       pickupDate: "",
+      pickupTime: "",
+      pickupContact: "",
+      pickupPhone: "",
+      destinationAddress: "",
+      destinationCity: "",
+      destinationState: "",
+      destinationZip: "",
       deliveryDate: "",
-      rate: "",
-      weight: "",
+      deliveryTime: "",
+      deliveryContact: "",
+      deliveryPhone: "",
       commodity: "",
+      weight: "",
+      pieces: "",
+      dimensions: "",
       equipment: "",
+      rate: "",
+      mileage: "",
+      driverName: "",
+      driverPhone: "",
+      driverEmail: "",
+      specialInstructions: "",
       notes: "",
+      hazmat: false,
+      temperature: "",
+      vin: "",
     })
   }
 
+  const renderFormFields = () => (
+    <div className="space-y-6">
+      {/* Basic Load Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold">Load Information</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="reference">Reference Number *</Label>
+            <Input id="reference" value={formData.reference} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="loadNumber">Load Number</Label>
+            <Input id="loadNumber" value={formData.loadNumber} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="customer">Customer/Broker *</Label>
+            <Input id="customer" value={formData.customer} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="brokerEmail">Broker Email</Label>
+            <Input id="brokerEmail" type="email" value={formData.brokerEmail} onChange={handleInputChange} />
+          </div>
+        </div>
+      </div>
+
+      {/* Origin Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold">Pickup Information</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2 col-span-2">
+            <Label htmlFor="originAddress">Pickup Address *</Label>
+            <Input id="originAddress" value={formData.originAddress} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="originCity">City *</Label>
+            <Input id="originCity" value={formData.originCity} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="originState">State *</Label>
+            <Select value={formData.originState} onValueChange={(value) => handleSelectChange("originState", value)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select state" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="AL">Alabama</SelectItem>
+                <SelectItem value="AK">Alaska</SelectItem>
+                <SelectItem value="AZ">Arizona</SelectItem>
+                <SelectItem value="AR">Arkansas</SelectItem>
+                <SelectItem value="CA">California</SelectItem>
+                <SelectItem value="CO">Colorado</SelectItem>
+                <SelectItem value="CT">Connecticut</SelectItem>
+                <SelectItem value="DE">Delaware</SelectItem>
+                <SelectItem value="FL">Florida</SelectItem>
+                <SelectItem value="GA">Georgia</SelectItem>
+                <SelectItem value="HI">Hawaii</SelectItem>
+                <SelectItem value="ID">Idaho</SelectItem>
+                <SelectItem value="IL">Illinois</SelectItem>
+                <SelectItem value="IN">Indiana</SelectItem>
+                <SelectItem value="IA">Iowa</SelectItem>
+                <SelectItem value="KS">Kansas</SelectItem>
+                <SelectItem value="KY">Kentucky</SelectItem>
+                <SelectItem value="LA">Louisiana</SelectItem>
+                <SelectItem value="ME">Maine</SelectItem>
+                <SelectItem value="MD">Maryland</SelectItem>
+                <SelectItem value="MA">Massachusetts</SelectItem>
+                <SelectItem value="MI">Michigan</SelectItem>
+                <SelectItem value="MN">Minnesota</SelectItem>
+                <SelectItem value="MS">Mississippi</SelectItem>
+                <SelectItem value="MO">Missouri</SelectItem>
+                <SelectItem value="MT">Montana</SelectItem>
+                <SelectItem value="NE">Nebraska</SelectItem>
+                <SelectItem value="NV">Nevada</SelectItem>
+                <SelectItem value="NH">New Hampshire</SelectItem>
+                <SelectItem value="NJ">New Jersey</SelectItem>
+                <SelectItem value="NM">New Mexico</SelectItem>
+                <SelectItem value="NY">New York</SelectItem>
+                <SelectItem value="NC">North Carolina</SelectItem>
+                <SelectItem value="ND">North Dakota</SelectItem>
+                <SelectItem value="OH">Ohio</SelectItem>
+                <SelectItem value="OK">Oklahoma</SelectItem>
+                <SelectItem value="OR">Oregon</SelectItem>
+                <SelectItem value="PA">Pennsylvania</SelectItem>
+                <SelectItem value="RI">Rhode Island</SelectItem>
+                <SelectItem value="SC">South Carolina</SelectItem>
+                <SelectItem value="SD">South Dakota</SelectItem>
+                <SelectItem value="TN">Tennessee</SelectItem>
+                <SelectItem value="TX">Texas</SelectItem>
+                <SelectItem value="UT">Utah</SelectItem>
+                <SelectItem value="VT">Vermont</SelectItem>
+                <SelectItem value="VA">Virginia</SelectItem>
+                <SelectItem value="WA">Washington</SelectItem>
+                <SelectItem value="WV">West Virginia</SelectItem>
+                <SelectItem value="WI">Wisconsin</SelectItem>
+                <SelectItem value="WY">Wyoming</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="originZip">ZIP Code</Label>
+            <Input id="originZip" value={formData.originZip} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pickupDate">Pickup Date *</Label>
+            <Input id="pickupDate" type="date" value={formData.pickupDate} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pickupTime">Pickup Time</Label>
+            <Input id="pickupTime" type="time" value={formData.pickupTime} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pickupContact">Pickup Contact</Label>
+            <Input id="pickupContact" value={formData.pickupContact} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pickupPhone">Pickup Phone</Label>
+            <Input id="pickupPhone" value={formData.pickupPhone} onChange={handleInputChange} />
+          </div>
+        </div>
+      </div>
+
+      {/* Destination Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold">Delivery Information</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2 col-span-2">
+            <Label htmlFor="destinationAddress">Delivery Address *</Label>
+            <Input id="destinationAddress" value={formData.destinationAddress} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="destinationCity">City *</Label>
+            <Input id="destinationCity" value={formData.destinationCity} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="destinationState">State *</Label>
+            <Select
+              value={formData.destinationState}
+              onValueChange={(value) => handleSelectChange("destinationState", value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select state" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="AL">Alabama</SelectItem>
+                <SelectItem value="AK">Alaska</SelectItem>
+                <SelectItem value="AZ">Arizona</SelectItem>
+                <SelectItem value="AR">Arkansas</SelectItem>
+                <SelectItem value="CA">California</SelectItem>
+                <SelectItem value="CO">Colorado</SelectItem>
+                <SelectItem value="CT">Connecticut</SelectItem>
+                <SelectItem value="DE">Delaware</SelectItem>
+                <SelectItem value="FL">Florida</SelectItem>
+                <SelectItem value="GA">Georgia</SelectItem>
+                <SelectItem value="HI">Hawaii</SelectItem>
+                <SelectItem value="ID">Idaho</SelectItem>
+                <SelectItem value="IL">Illinois</SelectItem>
+                <SelectItem value="IN">Indiana</SelectItem>
+                <SelectItem value="IA">Iowa</SelectItem>
+                <SelectItem value="KS">Kansas</SelectItem>
+                <SelectItem value="KY">Kentucky</SelectItem>
+                <SelectItem value="LA">Louisiana</SelectItem>
+                <SelectItem value="ME">Maine</SelectItem>
+                <SelectItem value="MD">Maryland</SelectItem>
+                <SelectItem value="MA">Massachusetts</SelectItem>
+                <SelectItem value="MI">Michigan</SelectItem>
+                <SelectItem value="MN">Minnesota</SelectItem>
+                <SelectItem value="MS">Mississippi</SelectItem>
+                <SelectItem value="MO">Missouri</SelectItem>
+                <SelectItem value="MT">Montana</SelectItem>
+                <SelectItem value="NE">Nebraska</SelectItem>
+                <SelectItem value="NV">Nevada</SelectItem>
+                <SelectItem value="NH">New Hampshire</SelectItem>
+                <SelectItem value="NJ">New Jersey</SelectItem>
+                <SelectItem value="NM">New Mexico</SelectItem>
+                <SelectItem value="NY">New York</SelectItem>
+                <SelectItem value="NC">North Carolina</SelectItem>
+                <SelectItem value="ND">North Dakota</SelectItem>
+                <SelectItem value="OH">Ohio</SelectItem>
+                <SelectItem value="OK">Oklahoma</SelectItem>
+                <SelectItem value="OR">Oregon</SelectItem>
+                <SelectItem value="PA">Pennsylvania</SelectItem>
+                <SelectItem value="RI">Rhode Island</SelectItem>
+                <SelectItem value="SC">South Carolina</SelectItem>
+                <SelectItem value="SD">South Dakota</SelectItem>
+                <SelectItem value="TN">Tennessee</SelectItem>
+                <SelectItem value="TX">Texas</SelectItem>
+                <SelectItem value="UT">Utah</SelectItem>
+                <SelectItem value="VT">Vermont</SelectItem>
+                <SelectItem value="VA">Virginia</SelectItem>
+                <SelectItem value="WA">Washington</SelectItem>
+                <SelectItem value="WV">West Virginia</SelectItem>
+                <SelectItem value="WI">Wisconsin</SelectItem>
+                <SelectItem value="WY">Wyoming</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="destinationZip">ZIP Code</Label>
+            <Input id="destinationZip" value={formData.destinationZip} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="deliveryDate">Delivery Date *</Label>
+            <Input id="deliveryDate" type="date" value={formData.deliveryDate} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="deliveryTime">Delivery Time</Label>
+            <Input id="deliveryTime" type="time" value={formData.deliveryTime} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="deliveryContact">Delivery Contact</Label>
+            <Input id="deliveryContact" value={formData.deliveryContact} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="deliveryPhone">Delivery Phone</Label>
+            <Input id="deliveryPhone" value={formData.deliveryPhone} onChange={handleInputChange} />
+          </div>
+        </div>
+      </div>
+
+      {/* Load Details */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold">Load Details</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="commodity">Commodity *</Label>
+            <Input id="commodity" value={formData.commodity} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="weight">Weight (lbs)</Label>
+            <Input id="weight" value={formData.weight} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pieces">Number of Pieces</Label>
+            <Input id="pieces" value={formData.pieces} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="dimensions">Dimensions</Label>
+            <Input id="dimensions" placeholder="L x W x H" value={formData.dimensions} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="equipment">Equipment Type</Label>
+            <Select value={formData.equipment} onValueChange={(value) => handleSelectChange("equipment", value)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select equipment" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="dry-van">Dry Van</SelectItem>
+                <SelectItem value="reefer">Refrigerated</SelectItem>
+                <SelectItem value="flatbed">Flatbed</SelectItem>
+                <SelectItem value="step-deck">Step Deck</SelectItem>
+                <SelectItem value="lowboy">Lowboy</SelectItem>
+                <SelectItem value="car-carrier">Car Carrier</SelectItem>
+                <SelectItem value="tanker">Tanker</SelectItem>
+                <SelectItem value="box-truck">Box Truck</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="rate">Rate ($)</Label>
+            <Input id="rate" value={formData.rate} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="mileage">Estimated Mileage</Label>
+            <Input id="mileage" value={formData.mileage} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="vin">VIN (if applicable)</Label>
+            <Input id="vin" value={formData.vin} onChange={handleInputChange} />
+          </div>
+        </div>
+      </div>
+
+      {/* Driver Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold">Driver Information</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="driverName">Driver Name</Label>
+            <Input id="driverName" value={formData.driverName} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="driverPhone">Driver Phone</Label>
+            <Input id="driverPhone" value={formData.driverPhone} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="driverEmail">Driver Email</Label>
+            <Input id="driverEmail" type="email" value={formData.driverEmail} onChange={handleInputChange} />
+          </div>
+        </div>
+      </div>
+
+      {/* Additional Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold">Additional Information</h3>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="specialInstructions">Special Instructions</Label>
+            <Textarea
+              id="specialInstructions"
+              value={formData.specialInstructions}
+              onChange={handleInputChange}
+              className="min-h-[80px]"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="notes">Internal Notes</Label>
+            <Textarea id="notes" value={formData.notes} onChange={handleInputChange} className="min-h-[80px]" />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create New Load</DialogTitle>
           <DialogDescription>
@@ -219,52 +667,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
           </TabsList>
 
           <TabsContent value="manual" className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="reference">Reference Number</Label>
-                <Input id="reference" value={formData.reference} onChange={handleInputChange} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="customer">Customer</Label>
-                <Input id="customer" value={formData.customer} onChange={handleInputChange} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="origin">Origin</Label>
-                <Input id="origin" value={formData.origin} onChange={handleInputChange} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="destination">Destination</Label>
-                <Input id="destination" value={formData.destination} onChange={handleInputChange} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="pickupDate">Pickup Date</Label>
-                <Input id="pickupDate" type="date" value={formData.pickupDate} onChange={handleInputChange} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="deliveryDate">Delivery Date</Label>
-                <Input id="deliveryDate" type="date" value={formData.deliveryDate} onChange={handleInputChange} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="rate">Rate</Label>
-                <Input id="rate" value={formData.rate} onChange={handleInputChange} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="weight">Weight</Label>
-                <Input id="weight" value={formData.weight} onChange={handleInputChange} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="commodity">Commodity</Label>
-                <Input id="commodity" value={formData.commodity} onChange={handleInputChange} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="equipment">Equipment Type</Label>
-                <Input id="equipment" value={formData.equipment} onChange={handleInputChange} />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="notes">Notes</Label>
-              <Textarea id="notes" value={formData.notes} onChange={handleInputChange} className="min-h-[100px]" />
-            </div>
+            {renderFormFields()}
           </TabsContent>
 
           <TabsContent value="upload" className="space-y-4 py-4">
@@ -347,53 +750,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
                     Review the extracted information below and make any necessary corrections before creating the load.
                   </p>
                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="reference">Reference Number</Label>
-                    <Input id="reference" value={formData.reference} onChange={handleInputChange} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="customer">Customer</Label>
-                    <Input id="customer" value={formData.customer} onChange={handleInputChange} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="origin">Origin</Label>
-                    <Input id="origin" value={formData.origin} onChange={handleInputChange} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="destination">Destination</Label>
-                    <Input id="destination" value={formData.destination} onChange={handleInputChange} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="pickupDate">Pickup Date</Label>
-                    <Input id="pickupDate" type="date" value={formData.pickupDate} onChange={handleInputChange} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="deliveryDate">Delivery Date</Label>
-                    <Input id="deliveryDate" type="date" value={formData.deliveryDate} onChange={handleInputChange} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="rate">Rate</Label>
-                    <Input id="rate" value={formData.rate} onChange={handleInputChange} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="weight">Weight</Label>
-                    <Input id="weight" value={formData.weight} onChange={handleInputChange} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="commodity">Commodity</Label>
-                    <Input id="commodity" value={formData.commodity} onChange={handleInputChange} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="equipment">Equipment Type</Label>
-                    <Input id="equipment" value={formData.equipment} onChange={handleInputChange} />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="notes">Notes</Label>
-                  <Textarea id="notes" value={formData.notes} onChange={handleInputChange} className="min-h-[100px]" />
-                </div>
+                {renderFormFields()}
               </div>
             )}
           </TabsContent>
@@ -403,7 +760,12 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={!formData.reference || !formData.customer}>
+          <Button
+            onClick={handleSubmit}
+            disabled={
+              !formData.reference || !formData.customer || !formData.originAddress || !formData.destinationAddress
+            }
+          >
             Create Load
           </Button>
         </DialogFooter>

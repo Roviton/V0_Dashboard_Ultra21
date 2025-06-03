@@ -74,24 +74,15 @@ export function AITestPanel() {
         setOcrResult(result.data)
         toast({
           title: "OCR Successful",
-          description: `Extracted data from ${selectedFile.name} using ${result.processingMethod || "standard"} method`,
+          description: `Extracted data from ${selectedFile.name} using ${result.processingMethod || "AI vision"} method`,
         })
       } else {
         setOcrError(result.error || "Unknown error occurred")
-
-        if (result.isPdfError) {
-          toast({
-            title: "PDF Processing Info",
-            description: result.error || "PDF processing requires conversion to images",
-            variant: "default",
-          })
-        } else {
-          toast({
-            title: "OCR Failed",
-            description: result.error || "Failed to extract data",
-            variant: "destructive",
-          })
-        }
+        toast({
+          title: "OCR Failed",
+          description: result.error || "Failed to extract data",
+          variant: "destructive",
+        })
       }
     } catch (error) {
       console.error("OCR test error:", error)
@@ -237,8 +228,8 @@ export function AITestPanel() {
       <Alert>
         <CheckCircle className="h-4 w-4" />
         <AlertDescription>
-          <strong>PDF Support Enabled:</strong> You can now upload both PDF rate confirmations and image files. The
-          system will automatically process PDFs and convert them for OCR analysis.
+          <strong>Full Document Support:</strong> Upload images (JPEG, PNG, WebP) or PDF documents for AI extraction.
+          Both formats are fully supported!
         </AlertDescription>
       </Alert>
 
@@ -246,7 +237,7 @@ export function AITestPanel() {
         <CardHeader>
           <CardTitle>Document OCR</CardTitle>
           <CardDescription>
-            Upload a PDF or image of a bill of lading or rate confirmation to extract data using OCR
+            Upload an image of a bill of lading or rate confirmation to extract data using AI vision
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -266,7 +257,7 @@ export function AITestPanel() {
                         <span className="font-semibold">{selectedFile.name}</span>
                       </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {isPdfFile ? "PDF Document" : "Image File"}
+                        {isPdfFile ? "PDF Document" : "Image File"} - Ready for processing
                       </p>
                     </div>
                   ) : (
@@ -275,7 +266,9 @@ export function AITestPanel() {
                       <p className="mb-2 text-sm text-gray-500 dark:text-gray-400">
                         <span className="font-semibold">Click to upload</span> or drag and drop
                       </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">PDF, PNG, JPG or WEBP (MAX. 10MB)</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        PDF, PNG, JPG, WEBP (MAX. 10MB) - All formats fully supported
+                      </p>
                     </>
                   )}
                 </div>
@@ -283,7 +276,7 @@ export function AITestPanel() {
                   id="file-upload"
                   type="file"
                   className="hidden"
-                  accept=".pdf,.png,.jpg,.jpeg,.webp"
+                  accept=".png,.jpg,.jpeg,.webp,.pdf"
                   onChange={handleFileChange}
                 />
               </label>
@@ -313,15 +306,15 @@ export function AITestPanel() {
           )}
 
           {ocrError && (
-            <div className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-300 rounded-md">
+            <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300 rounded-md">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="h-5 w-5 mt-0.5 flex-shrink-0" />
                 <div>
-                  <p className="font-medium">Processing Info:</p>
+                  <p className="font-medium">Processing Error:</p>
                   <p>{ocrError}</p>
                   {isPdfFile && (
                     <p className="mt-2 text-sm">
-                      PDF processing is experimental. For best results, convert PDFs to images before uploading.
+                      Try converting your PDF to an image format (JPEG/PNG) for better results.
                     </p>
                   )}
                 </div>
