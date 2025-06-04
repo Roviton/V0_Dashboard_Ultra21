@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
+import { supabase } from "@/lib/supabase"
 
 export type UserRole = "dispatcher" | "admin" | "manager" | "accountant"
 
@@ -10,6 +11,7 @@ interface User {
   email: string
   role: UserRole
   avatar?: string
+  companyId?: string // Add this for multi-tenancy
 }
 
 interface AuthContextType {
@@ -112,18 +114,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     setIsLoading(true)
     try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      // First try Supabase authentication
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
 
-      const foundUser = sampleUsers.find((u) => u.email === email && u.password === password)
-
-      if (!foundUser) {
-        throw new Error("Invalid credentials")
+      if (authError) {
+        // Fallback to sample users for demo
+        const foundUser = sampleUsers.find((u) => u.email === email && u.password === password)
+        if (!foundUser) {
+          throw new Error("Invalid credentials")
+        }
+        const { password: _, ...userWithoutPassword } = foundUser
+        setUser({ ...userWithoutPassword, companyId: "1" }) // Demo company ID
+        localStorage.setItem("user", JSON.stringify({ ...userWithoutPassword, companyId: "1" }))
+        return
       }
 
-      const { password: _, ...userWithoutPassword } = foundUser
-      setUser(userWithoutPassword)
-      localStorage.setItem("user", JSON.stringify(userWithoutPassword))
+      // If Supabase auth succeeds, get user profile
+      const { data: profile, error: profileError } = await supabase
+        .from("users")
+        .select("*")
+        .eq("email", email)
+        .single()
+
+      if (profileError || !profile) {
+        throw new Error("User profile not found")
+      }
+
+      const user = {
+        id: profile.id,
+        name: profile.name,
+        email: profile.email,
+        role: profile.role as UserRole,
+        avatar: profile.avatar_url || undefined,
+        companyId: profile.company_id,
+      }
+
+      setUser(user)
+      localStorage.setItem("user", JSON.stringify(user))
     } catch (error) {
       console.error("Login failed:", error)
       throw error

@@ -362,12 +362,20 @@ export const LoadsDataTable = forwardRef<
   useEffect(() => {
     let filteredData = [...initialData]
 
-    // For dashboard, only show active, undelivered loads
+    // For dashboard: only show NEW, ASSIGNED, ACCEPTED, and IN_PROGRESS loads
+    // Completed/Refused loads stay here until driver gets a new assignment
     if (isDashboard) {
-      filteredData = filteredData.filter((load) => load.status !== "COMPLETED" && load.status !== "REFUSED")
+      filteredData = filteredData.filter(
+        (load) =>
+          load.status === "NEW" ||
+          load.status === "ASSIGNED" ||
+          load.status === "ACCEPTED" ||
+          load.status === "IN_PROGRESS",
+      )
     }
 
-    // For history view, only show completed or refused loads
+    // For history view (Loads page): show completed and refused loads
+    // These are loads where drivers have been assigned new work
     if (isHistoryView) {
       filteredData = filteredData.filter((load) => load.status === "COMPLETED" || load.status === "REFUSED")
     }

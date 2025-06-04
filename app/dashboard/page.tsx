@@ -7,8 +7,6 @@ import { DashboardFilters } from "@/components/dashboard/dashboard-filters"
 import { EnhancedNewLoadModal } from "@/components/dashboard/modals/enhanced-new-load-modal"
 import { useAuth } from "@/contexts/auth-context"
 import { useRouter } from "next/navigation"
-// Import the AIInsightsCard component
-import { AIInsightsCard } from "@/components/dashboard/ai-insights-card"
 
 export default function DashboardPage() {
   const [showNewLoadModal, setShowNewLoadModal] = useState(false)
@@ -34,13 +32,21 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-muted-foreground">
+            Active loads and new assignments. Completed loads move to Loads page when driver gets a new assignment.
+          </p>
+        </div>
       </div>
+
       <DashboardStats />
-      <AIInsightsCard />
 
       <DashboardFilters onNewLoad={() => setShowNewLoadModal(true)} />
+
+      {/* Main dashboard shows only NEW and ACTIVE loads */}
       <LoadsDataTable ref={loadsDataTableRef} isDashboard={true} />
+
       <EnhancedNewLoadModal
         isOpen={showNewLoadModal}
         onClose={() => setShowNewLoadModal(false)}
