@@ -14,11 +14,103 @@ interface LoadDetailsDialogProps {
 }
 
 export function LoadDetailsDialog({ isOpen, onClose, load }: LoadDetailsDialogProps) {
+  // Add null check to prevent errors
+  if (!load) {
+    return null
+  }
+
+  const getCustomerDisplay = (customer: any): string => {
+    if (!customer) return "Unknown Customer"
+
+    if (typeof customer === "string") {
+      return customer
+    }
+
+    if (typeof customer === "object") {
+      const name = customer.name || customer.company_name || customer.customer_name
+      if (typeof name === "string") {
+        return name
+      }
+      return "Unknown Customer"
+    }
+
+    return "Unknown Customer"
+  }
+
+  const getDriverDisplay = (loadDrivers: any): string => {
+    if (!loadDrivers) return "Unassigned"
+
+    // Ensure loadDrivers is an array
+    const driversArray = Array.isArray(loadDrivers) ? loadDrivers : []
+
+    if (driversArray.length === 0) return "Unassigned"
+
+    const driverNames = driversArray.map((assignment: any) => {
+      if (!assignment) return "Unknown Driver"
+
+      let driverName = "Unknown Driver"
+
+      // Handle if driver is a string directly
+      if (typeof assignment.driver === "string") {
+        driverName = assignment.driver
+      }
+      // Handle if driver is an object
+      else if (assignment.driver && typeof assignment.driver === "object") {
+        driverName = assignment.driver.name || "Unknown Driver"
+      }
+
+      const isPrimary = assignment.is_primary ? " (Primary)" : ""
+      return `${driverName}${isPrimary}`
+    })
+
+    return driverNames.join(", ")
+  }
+
+  const formatDate = (dateString: any): string => {
+    if (!dateString) return "N/A"
+    try {
+      return new Date(dateString).toLocaleDateString()
+    } catch {
+      return "Invalid Date"
+    }
+  }
+
+  const formatCurrency = (amount: any): string => {
+    if (amount === null || amount === undefined) return "$0.00"
+    const numAmount = typeof amount === "string" ? Number.parseFloat(amount) : amount
+    if (isNaN(numAmount)) return "$0.00"
+
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+    }).format(numAmount)
+  }
+
+  // Safely get string value from any property
+  const safeString = (value: any): string => {
+    if (value === null || value === undefined) return "N/A"
+    if (typeof value === "string") return value
+    if (typeof value === "number" || typeof value === "boolean") return String(value)
+    if (typeof value === "object") {
+      try {
+        // Try to get a meaningful string representation
+        if (value.name) return String(value.name)
+        if (value.id) return String(value.id)
+        return "Complex Object"
+      } catch {
+        return "Complex Object"
+      }
+    }
+    return "N/A"
+  }
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">Load Details - {load.id}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            Load Details - {safeString(load.load_number || load.id)}
+          </DialogTitle>
         </DialogHeader>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -28,7 +120,7 @@ export function LoadDetailsDialog({ isOpen, onClose, load }: LoadDetailsDialogPr
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-lg font-semibold">Rate Confirmation</h3>
                 <Badge variant="outline" className="ml-2">
-                  {load.rate}
+                  {formatCurrency(load.rate)}
                 </Badge>
               </div>
               <div className="relative aspect-[8.5/11] w-full overflow-hidden rounded-md border bg-white">
@@ -37,7 +129,7 @@ export function LoadDetailsDialog({ isOpen, onClose, load }: LoadDetailsDialogPr
                     <FileText className="mb-2 h-12 w-12 text-muted-foreground" />
                     <p className="text-sm font-medium">Rate Confirmation PDF</p>
                     <p className="text-xs text-muted-foreground">
-                      {load.id} - {load.dispatcher}
+                      {safeString(load.load_number || load.id)} - {safeString(load.dispatcher)}
                     </p>
                   </div>
                 </div>
@@ -45,7 +137,7 @@ export function LoadDetailsDialog({ isOpen, onClose, load }: LoadDetailsDialogPr
               <div className="mt-3 flex justify-end">
                 <Badge variant="secondary" className="flex items-center gap-1">
                   <Paperclip className="h-3 w-3" />
-                  <span>rate-confirmation-{load.id.toLowerCase()}.pdf</span>
+                  <span>rate-confirmation-{safeString(load.load_number || load.id).toLowerCase()}.pdf</span>
                 </Badge>
               </div>
             </CardContent>
@@ -69,71 +161,67 @@ export function LoadDetailsDialog({ isOpen, onClose, load }: LoadDetailsDialogPr
                     <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
                       <div>
                         <span className="text-xs font-medium text-muted-foreground">Load ID:</span>
-                        <p>{load.id}</p>
+                        <p>{safeString(load.load_number || load.id)}</p>
                       </div>
                       <div>
                         <span className="text-xs font-medium text-muted-foreground">Status:</span>
-                        <p>{load.status}</p>
+                        <p>{safeString(load.status)}</p>
+                      </div>
+
+                      <div>
+                        <span className="text-xs font-medium text-muted-foreground">Customer:</span>
+                        <p>{getCustomerDisplay(load.customer)}</p>
+                      </div>
+                      <div>
+                        <span className="text-xs font-medium text-muted-foreground">Dispatcher:</span>
+                        <p>{safeString(load.dispatcher)}</p>
                       </div>
 
                       <div>
                         <span className="text-xs font-medium text-muted-foreground">Origin:</span>
-                        <p>{load.origin}</p>
+                        <p>
+                          {safeString(load.pickup_city)}, {safeString(load.pickup_state)}
+                        </p>
                       </div>
                       <div>
                         <span className="text-xs font-medium text-muted-foreground">Destination:</span>
-                        <p>{load.destination}</p>
+                        <p>
+                          {safeString(load.delivery_city)}, {safeString(load.delivery_state)}
+                        </p>
                       </div>
 
                       <div>
                         <span className="text-xs font-medium text-muted-foreground">Pickup Date:</span>
-                        <p>{load.pickupDate}</p>
+                        <p>{formatDate(load.pickup_date)}</p>
                       </div>
                       <div>
                         <span className="text-xs font-medium text-muted-foreground">Delivery Date:</span>
-                        <p>{load.deliveryDate}</p>
+                        <p>{formatDate(load.delivery_date)}</p>
                       </div>
 
                       <div>
                         <span className="text-xs font-medium text-muted-foreground">Rate:</span>
-                        <p>{load.rate}</p>
+                        <p>{formatCurrency(load.rate)}</p>
                       </div>
                       <div>
-                        <span className="text-xs font-medium text-muted-foreground">Dispatcher:</span>
-                        <p>{load.dispatcher}</p>
-                      </div>
-
-                      {/* Additional details that would be available in a real implementation */}
-                      <div className="md:col-span-2">
-                        <span className="text-xs font-medium text-muted-foreground">Shipper Information:</span>
-                        <p>ABC Shipping Co.</p>
-                        <p>123 Warehouse Blvd, {load.origin}</p>
-                        <p>Contact: John Smith (555-123-4567)</p>
-                      </div>
-
-                      <div className="md:col-span-2">
-                        <span className="text-xs font-medium text-muted-foreground">Consignee Information:</span>
-                        <p>XYZ Distribution Center</p>
-                        <p>456 Delivery Ave, {load.destination}</p>
-                        <p>Contact: Jane Doe (555-987-6543)</p>
+                        <span className="text-xs font-medium text-muted-foreground">Equipment:</span>
+                        <p>{safeString(load.equipment_type)}</p>
                       </div>
 
                       <div className="md:col-span-2">
                         <span className="text-xs font-medium text-muted-foreground">Commodity:</span>
-                        <p>General Freight - 42,000 lbs</p>
+                        <p>{safeString(load.commodity)}</p>
+                        {load.weight && <p>Weight: {safeString(load.weight)} lbs</p>}
                       </div>
 
                       <div className="md:col-span-2">
-                        <span className="text-xs font-medium text-muted-foreground">Equipment:</span>
-                        <p>Dry Van - 53'</p>
+                        <span className="text-xs font-medium text-muted-foreground">Driver:</span>
+                        <p>{getDriverDisplay(load.load_drivers)}</p>
                       </div>
 
                       <div className="md:col-span-2">
                         <span className="text-xs font-medium text-muted-foreground">Special Instructions:</span>
-                        <p className="whitespace-pre-line">
-                          - Driver must check in at security gate - Lumper fee to be paid by carrier (reimbursable with
-                          receipt) - Hard hat and safety vest required - Call consignee 1 hour before arrival
-                        </p>
+                        <p className="whitespace-pre-line">{safeString(load.special_instructions)}</p>
                       </div>
                     </div>
                   </div>
@@ -143,7 +231,7 @@ export function LoadDetailsDialog({ isOpen, onClose, load }: LoadDetailsDialogPr
               <TabsContent value="comments" className="p-4">
                 <div className="space-y-2">
                   <span className="text-xs font-medium text-muted-foreground">Manager Comments:</span>
-                  <p className="whitespace-pre-line">{load.comments || "No manager comments"}</p>
+                  <p className="whitespace-pre-line">{safeString(load.comments)}</p>
                 </div>
               </TabsContent>
             </Tabs>

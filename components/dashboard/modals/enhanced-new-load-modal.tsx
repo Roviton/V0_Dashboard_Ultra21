@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -18,13 +18,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
-import { Upload, Loader2, CheckCircle2, AlertCircle, Wand2, X } from "lucide-react"
+import { Upload, Loader2, CheckCircle2, AlertCircle, Wand2, X, FileText, ZoomIn, ZoomOut } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface EnhancedNewLoadModalProps {
   isOpen: boolean
   onClose: () => void
   onSubmit: (loadData: any) => void
+}
+
+// Declare PDF.js types
+declare global {
+  interface Window {
+    pdfjsLib: any
+  }
 }
 
 export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewLoadModalProps) {
@@ -38,6 +45,13 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   const [imageUrl, setImageUrl] = useState("")
   const [extractedData, setExtractedData] = useState<any>(null)
   const [documentPreview, setDocumentPreview] = useState<string | null>(null)
+  const [pdfDataUrl, setPdfDataUrl] = useState<string | null>(null)
+  const [pdfScale, setPdfScale] = useState(1.0)
+  const [pdfLoaded, setPdfLoaded] = useState(false)
+  const [pdfRenderPending, setPdfRenderPending] = useState(false)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const pdfDocRef = useRef<any>(null)
+  const pendingPdfDataRef = useRef<string | null>(null)
   const [formData, setFormData] = useState({
     // Basic Load Information
     reference: "",
@@ -89,6 +103,219 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   })
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+
+  // Load PDF.js when component mounts
+  useEffect(() => {
+    const loadPDFJS = async () => {
+      if (typeof window !== "undefined" && !window.pdfjsLib) {
+        try {
+          // Load PDF.js from CDN
+          const script = document.createElement("script")
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
+          script.onload = () => {
+            if (window.pdfjsLib) {
+              window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+                "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"
+              console.log("PDF.js loaded successfully")
+            }
+          }
+          script.onerror = () => {
+            console.error("Failed to load PDF.js")
+          }
+          document.head.appendChild(script)
+        } catch (error) {
+          console.error("Error loading PDF.js:", error)
+        }
+      }
+    }
+
+    loadPDFJS()
+  }, [])
+
+  // Effect to handle pending PDF rendering when canvas becomes available
+  useEffect(() => {
+    if (canvasRef.current && pdfRenderPending && pendingPdfDataRef.current) {
+      console.log("Canvas is now available, rendering pending PDF...")
+      displayPDFPreview(pendingPdfDataRef.current)
+      setPdfRenderPending(false)
+      pendingPdfDataRef.current = null
+    }
+  }, [documentPreview, pdfRenderPending])
+
+  const displayPDFPreview = useCallback(
+    async (base64Content: string) => {
+      console.log("Starting PDF preview display...")
+
+      if (!window.pdfjsLib) {
+        console.error("PDF.js not loaded")
+        toast({
+          title: "PDF Viewer Error",
+          description: "PDF.js library not loaded. Please refresh and try again.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      if (!canvasRef.current) {
+        console.log("Canvas ref not available yet, storing PDF data for later rendering...")
+        pendingPdfDataRef.current = base64Content
+        setPdfRenderPending(true)
+        return
+      }
+
+      try {
+        console.log("Processing PDF data...")
+
+        // Convert base64 to Uint8Array
+        const base64Data = base64Content.includes(",") ? base64Content.split(",")[1] : base64Content
+        const binaryString = atob(base64Data)
+        const bytes = new Uint8Array(binaryString.length)
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i)
+        }
+
+        console.log("PDF bytes length:", bytes.length)
+
+        // Load PDF document
+        console.log("Loading PDF document...")
+        const loadingTask = window.pdfjsLib.getDocument({
+          data: bytes,
+          cMapUrl: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/",
+          cMapPacked: true,
+        })
+
+        const pdf = await loadingTask.promise
+        console.log("PDF loaded, pages:", pdf.numPages)
+        pdfDocRef.current = pdf
+        setTotalPages(pdf.numPages)
+
+        // Get first page
+        console.log("Getting first page...")
+        const page = await pdf.getPage(1)
+        console.log("Page loaded")
+
+        // Set up canvas
+        const canvas = canvasRef.current
+        const context = canvas.getContext("2d")
+
+        if (!context) {
+          throw new Error("Could not get canvas context")
+        }
+
+        // Calculate scale to fit container with better quality
+        const viewport = page.getViewport({ scale: 1.0 })
+        const containerWidth = 550 // Increased container width
+        const scale = Math.min(containerWidth / viewport.width, pdfScale)
+        const scaledViewport = page.getViewport({ scale })
+
+        // Set device pixel ratio for better quality
+        const devicePixelRatio = window.devicePixelRatio || 1
+        canvas.height = scaledViewport.height * devicePixelRatio
+        canvas.width = scaledViewport.width * devicePixelRatio
+        canvas.style.width = scaledViewport.width + "px"
+        canvas.style.height = scaledViewport.height + "px"
+
+        // Scale the context for high DPI displays
+        context.scale(devicePixelRatio, devicePixelRatio)
+
+        console.log("Viewport:", { width: scaledViewport.width, height: scaledViewport.height, scale })
+
+        // Clear canvas
+        context.clearRect(0, 0, canvas.width, canvas.height)
+
+        // Render page
+        console.log("Rendering page...")
+        const renderContext = {
+          canvasContext: context,
+          viewport: scaledViewport,
+        }
+
+        await page.render(renderContext).promise
+        console.log("PDF rendered successfully")
+        setPdfLoaded(true)
+        setPdfScale(scale)
+      } catch (error) {
+        console.error("Error rendering PDF:", error)
+        setPdfLoaded(false)
+
+        // Show fallback message
+        if (canvasRef.current) {
+          const canvas = canvasRef.current
+          const context = canvas.getContext("2d")
+          if (context) {
+            canvas.width = 300
+            canvas.height = 200
+            context.fillStyle = "#f3f4f6"
+            context.fillRect(0, 0, canvas.width, canvas.height)
+            context.fillStyle = "#6b7280"
+            context.font = "14px Arial"
+            context.textAlign = "center"
+            context.fillText("PDF Preview Unavailable", canvas.width / 2, canvas.height / 2 - 10)
+            context.fillText("Data extraction completed", canvas.width / 2, canvas.height / 2 + 10)
+          }
+        }
+
+        toast({
+          title: "PDF Rendering Error",
+          description: "Could not display PDF preview, but data extraction was successful.",
+          variant: "destructive",
+        })
+      }
+    },
+    [pdfScale, toast],
+  )
+
+  const handlePDFZoom = async (newScale: number) => {
+    if (!pdfDocRef.current || !canvasRef.current) {
+      console.error("PDF document or canvas not available for zoom")
+      return
+    }
+
+    console.log("Zooming to scale:", newScale)
+
+    try {
+      const page = await pdfDocRef.current.getPage(currentPage)
+      const canvas = canvasRef.current
+      const context = canvas.getContext("2d")
+
+      if (!context) {
+        throw new Error("Could not get canvas context")
+      }
+
+      const viewport = page.getViewport({ scale: newScale })
+
+      // Set device pixel ratio for better quality
+      const devicePixelRatio = window.devicePixelRatio || 1
+      canvas.height = viewport.height * devicePixelRatio
+      canvas.width = viewport.width * devicePixelRatio
+      canvas.style.width = viewport.width + "px"
+      canvas.style.height = viewport.height + "px"
+
+      // Scale the context for high DPI displays
+      context.scale(devicePixelRatio, devicePixelRatio)
+
+      // Clear and render
+      context.clearRect(0, 0, canvas.width, canvas.height)
+
+      const renderContext = {
+        canvasContext: context,
+        viewport: viewport,
+      }
+
+      await page.render(renderContext).promise
+      setPdfScale(newScale)
+      console.log("PDF zoom completed to:", newScale)
+    } catch (error) {
+      console.error("Error zooming PDF:", error)
+      toast({
+        title: "Zoom Error",
+        description: "Could not zoom PDF preview",
+        variant: "destructive",
+      })
+    }
+  }
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { id, value, type } = e.target
@@ -119,7 +346,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
 
     setSelectedFile(file)
 
-    // Create preview for images (PDFs will show a placeholder)
+    // Create preview for images and PDFs
     if (file.type.startsWith("image/")) {
       const reader = new FileReader()
       reader.onload = (e) => {
@@ -128,12 +355,23 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
         }
       }
       reader.readAsDataURL(file)
-    } else {
-      // For PDFs, set a placeholder preview
-      setDocumentPreview("PDF_PLACEHOLDER")
+    } else if (file.type === "application/pdf") {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        if (e.target?.result) {
+          const dataUrl = e.target.result as string
+          setPdfDataUrl(dataUrl)
+          setDocumentPreview("PDF_DOCUMENT")
+          // Use setTimeout to ensure the canvas is rendered before trying to use it
+          setTimeout(() => {
+            displayPDFPreview(dataUrl)
+          }, 100)
+        }
+      }
+      reader.readAsDataURL(file)
     }
 
-    // Convert file to URL for processing
+    // Convert file to data URL for processing
     const reader = new FileReader()
     reader.onload = (e) => {
       if (e.target?.result) {
@@ -427,6 +665,15 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     setImageUrl("")
     setExtractedData(null)
     setDocumentPreview(null)
+    setPdfDataUrl(null)
+    setPdfScale(1.0)
+    setPdfLoaded(false)
+    setPdfRenderPending(false)
+    pdfDocRef.current = null
+    pendingPdfDataRef.current = null
+    setCurrentPage(1)
+    setTotalPages(1)
+
     setFormData({
       reference: "",
       loadNumber: "",
@@ -467,24 +714,208 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     })
   }
 
+  const renderPage = async (pageNumber: number) => {
+    if (!pdfDocRef.current || !canvasRef.current) return
+
+    try {
+      const page = await pdfDocRef.current.getPage(pageNumber)
+      const canvas = canvasRef.current
+      const context = canvas.getContext("2d")
+
+      if (!context) {
+        throw new Error("Could not get canvas context")
+      }
+
+      // Calculate scale to fit container with better quality
+      const viewport = page.getViewport({ scale: 1.0 })
+      const containerWidth = 550 // Increased container width
+      const scale = Math.min(containerWidth / viewport.width, pdfScale)
+      const scaledViewport = page.getViewport({ scale })
+
+      // Set device pixel ratio for better quality
+      const devicePixelRatio = window.devicePixelRatio || 1
+      canvas.height = scaledViewport.height * devicePixelRatio
+      canvas.width = scaledViewport.width * devicePixelRatio
+      canvas.style.width = scaledViewport.width + "px"
+      canvas.style.height = scaledViewport.height + "px"
+
+      // Scale the context for high DPI displays
+      context.scale(devicePixelRatio, devicePixelRatio)
+
+      // Clear canvas
+      context.clearRect(0, 0, canvas.width, canvas.height)
+
+      // Render page
+      const renderContext = {
+        canvasContext: context,
+        viewport: scaledViewport,
+      }
+
+      await page.render(renderContext).promise
+      setCurrentPage(pageNumber)
+      setPdfLoaded(true)
+      setPdfScale(scale)
+    } catch (error) {
+      console.error("Error rendering PDF:", error)
+      setPdfLoaded(false)
+
+      // Show fallback message
+      if (canvasRef.current) {
+        const canvas = canvasRef.current
+        const context = canvas.getContext("2d")
+        if (context) {
+          canvas.width = 300
+          canvas.height = 200
+          context.fillStyle = "#f3f4f6"
+          context.fillRect(0, 0, canvas.width, canvas.height)
+          context.fillStyle = "#6b7280"
+          context.font = "14px Arial"
+          context.textAlign = "center"
+          context.fillText("PDF Preview Unavailable", canvas.width / 2, canvas.height / 2 - 10)
+          context.fillText("Data extraction completed", canvas.width / 2, canvas.height / 2 + 10)
+        }
+      }
+
+      toast({
+        title: "PDF Rendering Error",
+        description: "Could not display PDF preview, but data extraction was successful.",
+        variant: "destructive",
+      })
+    }
+  }
+
   const renderDocumentPreview = () => {
     if (!documentPreview) return null
 
     return (
-      <div className="w-80 border-r bg-gray-50 p-4 flex flex-col">
+      <div className="w-[600px] border-r bg-gray-50 p-4 flex flex-col">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold">Document Preview</h3>
-          <Button variant="outline" size="sm" onClick={() => setDocumentPreview(null)}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setDocumentPreview(null)
+              setPdfDataUrl(null)
+              setPdfLoaded(false)
+              setPdfRenderPending(false)
+              pdfDocRef.current = null
+              pendingPdfDataRef.current = null
+            }}
+          >
             <X className="h-4 w-4" />
           </Button>
         </div>
 
-        <div className="flex-1 flex items-center justify-center">
-          {documentPreview === "PDF_PLACEHOLDER" ? (
-            <div className="flex flex-col items-center justify-center h-full bg-white rounded-lg border-2 border-dashed border-gray-300 p-8">
-              <div className="text-6xl mb-4">📄</div>
-              <p className="text-lg font-medium text-gray-700">PDF Document</p>
-              <p className="text-sm text-gray-500 text-center mt-2">{selectedFile?.name}</p>
+        <div className="flex-1 flex flex-col">
+          {documentPreview === "PDF_DOCUMENT" && pdfDataUrl ? (
+            <div className="w-full h-full bg-white rounded-lg border overflow-hidden flex flex-col">
+              {/* PDF Header with just file info */}
+              <div className="flex items-center justify-between p-3 bg-gray-100 border-b">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-gray-600" />
+                  <span className="text-sm font-medium text-gray-700 truncate">{selectedFile?.name}</span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setDocumentPreview(null)
+                    setPdfDataUrl(null)
+                    setPdfLoaded(false)
+                    setPdfRenderPending(false)
+                    pdfDocRef.current = null
+                    pendingPdfDataRef.current = null
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {/* PDF Canvas */}
+              <div className="flex-1 overflow-auto bg-gray-100 p-4" style={{ maxHeight: "600px" }}>
+                <div className="flex justify-center min-h-full">
+                  {!pdfLoaded && !pdfRenderPending && (
+                    <div className="flex items-center justify-center w-72 h-96 bg-white border border-gray-300 rounded">
+                      <div className="text-center">
+                        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-gray-400" />
+                        <p className="text-sm text-gray-500">Loading PDF...</p>
+                      </div>
+                    </div>
+                  )}
+                  {pdfRenderPending && (
+                    <div className="flex items-center justify-center w-72 h-96 bg-white border border-gray-300 rounded">
+                      <div className="text-center">
+                        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-gray-400" />
+                        <p className="text-sm text-gray-500">Preparing canvas...</p>
+                      </div>
+                    </div>
+                  )}
+                  <canvas
+                    ref={canvasRef}
+                    className={cn("border border-gray-300 shadow-lg bg-white rounded", !pdfLoaded && "hidden")}
+                    style={{
+                      maxWidth: "100%",
+                      height: "auto",
+                      display: pdfLoaded ? "block" : "none",
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Page Navigation and Zoom Controls */}
+              {documentPreview === "PDF_DOCUMENT" && (
+                <div className="flex items-center justify-between p-3 bg-gray-50 border-t">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => renderPage(Math.max(1, currentPage - 1))}
+                      disabled={!pdfLoaded || currentPage <= 1}
+                    >
+                      Previous
+                    </Button>
+                    <span className="text-xs px-2">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => renderPage(Math.min(totalPages, currentPage + 1))}
+                      disabled={!pdfLoaded || currentPage >= totalPages}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        handlePDFZoom(Math.max(0.5, pdfScale - 0.25))
+                      }}
+                      disabled={!pdfLoaded}
+                    >
+                      <ZoomOut className="h-3 w-3" />
+                    </Button>
+                    <span className="text-xs px-3 py-1 bg-white border rounded">{Math.round(pdfScale * 100)}%</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        handlePDFZoom(Math.min(3, pdfScale + 0.25))
+                      }}
+                      disabled={!pdfLoaded}
+                    >
+                      <ZoomIn className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-white rounded-lg border">
@@ -500,6 +931,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
         <div className="mt-4 text-xs text-gray-500">
           <p>✅ Document uploaded successfully</p>
           <p>📊 Data extraction {processingStatus === "success" ? "completed" : "in progress"}</p>
+          {documentPreview === "PDF_DOCUMENT" && <p>🔍 Use zoom controls to adjust view</p>}
         </div>
       </div>
     )
@@ -608,7 +1040,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
           </div>
           <div className="space-y-2">
             <Label htmlFor="pickupDate">Pickup Date *</Label>
-            <Input id="pickupDate" type="date" value={formData.pickupDate} onChange={handleInputChange} />
+            <Input id="pickupDate" type="date" value={formData.pickupDate} onChange={handleInputChange} required />
           </div>
           <div className="space-y-2">
             <Label htmlFor="pickupTime">Pickup Time</Label>
@@ -712,7 +1144,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
           </div>
           <div className="space-y-2">
             <Label htmlFor="deliveryDate">Delivery Date *</Label>
-            <Input id="deliveryDate" type="date" value={formData.deliveryDate} onChange={handleInputChange} />
+            <Input id="deliveryDate" type="date" value={formData.deliveryDate} onChange={handleInputChange} required />
           </div>
           <div className="space-y-2">
             <Label htmlFor="deliveryTime">Delivery Time</Label>
@@ -959,7 +1391,12 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
               <Button
                 onClick={handleSubmit}
                 disabled={
-                  !formData.reference || !formData.customer || !formData.originAddress || !formData.destinationAddress
+                  !formData.reference ||
+                  !formData.originAddress ||
+                  !formData.destinationAddress ||
+                  !formData.pickupDate ||
+                  !formData.deliveryDate ||
+                  !formData.commodity
                 }
               >
                 Create Load

@@ -44,7 +44,9 @@ export function Header() {
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-background px-4 md:px-6">
       <div className="flex items-center gap-2">
-        <h1 className="text-xl font-bold">Freight Dispatch System</h1>
+        <h1 className="text-2xl font-black bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent tracking-tight">
+          Ultra21
+        </h1>
       </div>
       <div className="relative ml-4 flex-1 md:grow-0 md:basis-1/3">
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -57,7 +59,9 @@ export function Header() {
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon" className="relative">
                 <Bell className="h-4 w-4" />
-                <Badge className="absolute -right-1 -top-1 h-4 w-4 p-0 text-[10px]">3</Badge>
+                <Badge className="absolute -right-1 -top-1 h-4 w-4 p-0 text-[10px] flex items-center justify-center">
+                  3
+                </Badge>
                 <span className="sr-only">Notifications</span>
               </Button>
             </DropdownMenuTrigger>
@@ -98,7 +102,9 @@ export function Header() {
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon" className="relative">
                 <MessageSquare className="h-4 w-4" />
-                <Badge className="absolute -right-1 -top-1 h-4 w-4 p-0 text-[10px]">2</Badge>
+                <Badge className="absolute -right-1 -top-1 h-4 w-4 p-0 text-[10px] flex items-center justify-center">
+                  2
+                </Badge>
                 <span className="sr-only">Messages</span>
               </Button>
             </DropdownMenuTrigger>
