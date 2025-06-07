@@ -69,51 +69,66 @@ export function useLoads(isDashboard = false) {
     return text.trim()
   }
 
+  // Check if the rate_confirmation_pdf_id column exists
+  const checkPdfColumnExists = async (): Promise<boolean> => {
+    try {
+      // Try to query the column to see if it exists
+      const { error } = await supabase.from("loads").select("rate_confirmation_pdf_id").limit(1)
+
+      return !error
+    } catch (err) {
+      console.log("PDF column doesn't exist yet:", err)
+      return false
+    }
+  }
+
   // Fetch loads from Supabase
   const fetchLoads = async () => {
     try {
       setLoading(true)
       setError(null)
 
-      let query = supabase
-        .from("loads")
-        .select(`
-          *,
-          customer:customers(
-            id,
-            name,
-            email,
-            contact_name
-          ),
-          dispatcher:users!loads_dispatcher_id_fkey(
-            id,
-            name,
-            email
-          ),
+      // Check if PDF column exists
+      const pdfColumnExists = await checkPdfColumnExists()
+
+      const selectFields = `
+      *,
+      customer:customers(
+        id,
+        name,
+        email,
+        contact_name
+      ),
+      dispatcher:users!loads_dispatcher_id_fkey(
+        id,
+        name,
+        email
+      ),
+      equipment_type:equipment_types(
+        id,
+        name,
+        description
+      ),
+      load_drivers(
+        id,
+        is_primary,
+        assigned_at,
+        driver:drivers(
+          id,
+          name,
+          phone,
+          email,
+          status,
           equipment_type:equipment_types(
             id,
             name,
             description
-          ),
-          load_drivers(
-            id,
-            is_primary,
-            assigned_at,
-            driver:drivers(
-              id,
-              name,
-              phone,
-              email,
-              status,
-              equipment_type:equipment_types(
-                id,
-                name,
-                description
-              )
-            )
           )
-        `)
-        .order("created_at", { ascending: false })
+        )
+      )
+    `
+
+      let query = supabase.from("loads").select(selectFields).order("created_at", { ascending: false })
 
       // Filter for dashboard view (active loads only)
       if (isDashboard) {
@@ -124,6 +139,8 @@ export function useLoads(isDashboard = false) {
 
       console.log("Fetched loads from DB:", data)
       console.log("isDashboard:", isDashboard)
+      console.log("PDF column exists:", pdfColumnExists)
+
       if (data) {
         console.log(
           "Load statuses from DB:",
@@ -157,6 +174,10 @@ export function useLoads(isDashboard = false) {
   const createLoad = async (loadData: any) => {
     try {
       console.log("Creating load with data:", loadData)
+
+      // Check if PDF column exists
+      const pdfColumnExists = await checkPdfColumnExists()
+      console.log("PDF column exists during creation:", pdfColumnExists)
 
       // Get existing data from the database instead of using hardcoded IDs
       const [companyResult, dispatcherResult, equipmentResult] = await Promise.all([
@@ -237,8 +258,17 @@ export function useLoads(isDashboard = false) {
       const pickupDate = formatDateForDB(loadData.pickupDate, true) // Required
       const deliveryDate = formatDateForDB(loadData.deliveryDate, true) // Required
 
+      // Use the tempPdfId passed from the modal if available
+      let rateConfirmationPdfId = null
+      if (pdfColumnExists && loadData.tempPdfId) {
+        rateConfirmationPdfId = loadData.tempPdfId
+        console.log(`Using provided tempPdfId: ${rateConfirmationPdfId}`)
+        // The document in tempDocumentStorage will be updated with the actual load ID
+        // after successful insertion of the load record.
+      }
+
       // Transform the form data to match our database schema with proper null handling
-      const loadInsert = {
+      const loadInsert: any = {
         load_number: `L-${Date.now()}-${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
         reference_number: formatTextForDB(loadData.reference) || formatTextForDB(loadData.loadNumber),
         customer_id: customerId,
@@ -284,6 +314,11 @@ export function useLoads(isDashboard = false) {
         temperature_range: formatTextForDB(loadData.temperature),
       }
 
+      // Only add PDF reference if column exists
+      if (pdfColumnExists) {
+        loadInsert.rate_confirmation_pdf_id = rateConfirmationPdfId
+      }
+
       console.log("Inserting load with cleaned data:", loadInsert)
 
       const { data, error } = await supabase.from("loads").insert(loadInsert).select().single()
@@ -295,12 +330,21 @@ export function useLoads(isDashboard = false) {
 
       console.log("Load created successfully:", data)
 
-      // Clean up any temporary documents associated with this load
-      if (data?.id && typeof window !== "undefined") {
-        // Clean up temporary document storage if it exists
-        const tempStorage = (window as any).tempDocumentStorage
-        if (tempStorage && typeof tempStorage.removeByLoadId === "function") {
-          tempStorage.removeByLoadId(data.id)
+      // Update the PDF with the actual load ID (only if column exists and PDF was stored)
+      if (
+        pdfColumnExists &&
+        rateConfirmationPdfId &&
+        data?.id &&
+        typeof window !== "undefined" &&
+        window.tempDocumentStorage
+      ) {
+        const success = window.tempDocumentStorage.updateLoadId(rateConfirmationPdfId, data.id)
+        if (success) {
+          console.log(`Updated temp document ${rateConfirmationPdfId} with actual load ID ${data.id}`)
+        } else {
+          console.warn(
+            `Failed to update temp document ${rateConfirmationPdfId} with load ID ${data.id}. It might have been removed or ID is incorrect.`,
+          )
         }
       }
 
@@ -330,6 +374,49 @@ export function useLoads(isDashboard = false) {
   // Update load status
   const updateLoadStatus = async (loadId: string, status: string) => {
     try {
+      // Check if PDF column exists
+      const pdfColumnExists = await checkPdfColumnExists()
+
+      let load = null
+      if (pdfColumnExists) {
+        // First, get the current load to check if it has a PDF
+        const { data: loadData, error: loadError } = await supabase
+          .from("loads")
+          .select("rate_confirmation_pdf_id, status")
+          .eq("id", loadId)
+          .single()
+
+        if (loadError) throw loadError
+        load = loadData
+      } else {
+        // Just get the status if PDF column doesn't exist
+        const { data: loadData, error: loadError } = await supabase
+          .from("loads")
+          .select("status")
+          .eq("id", loadId)
+          .single()
+
+        if (loadError) throw loadError
+        load = loadData
+      }
+
+      // Check if status is changing to inactive (completed or cancelled)
+      const isBecomingInactive =
+        ["completed", "cancelled"].includes(status) && !["completed", "cancelled"].includes(load.status)
+
+      // If becoming inactive and has a PDF, delete it (only if column exists)
+      if (
+        pdfColumnExists &&
+        isBecomingInactive &&
+        load.rate_confirmation_pdf_id &&
+        typeof window !== "undefined" &&
+        window.tempDocumentStorage
+      ) {
+        console.log(`Load ${loadId} becoming inactive, removing PDF ${load.rate_confirmation_pdf_id}`)
+        window.tempDocumentStorage.remove(load.rate_confirmation_pdf_id)
+      }
+
+      // Update the load status
       const { error } = await supabase.from("loads").update({ status }).eq("id", loadId)
 
       if (error) throw error

@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
 import { Upload, Loader2, CheckCircle2, AlertCircle, Wand2, X, FileText, ZoomIn, ZoomOut } from "lucide-react"
+import { tempDocumentStorage } from "@/lib/temp-document-storage"
 import { cn } from "@/lib/utils"
 
 interface EnhancedNewLoadModalProps {
@@ -53,6 +54,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   const pdfDocRef = useRef<any>(null)
   const pendingPdfDataRef = useRef<string | null>(null)
   const [formData, setFormData] = useState({
+    // ... (existing formData fields)
     // Basic Load Information
     reference: "",
     loadNumber: "",
@@ -104,6 +106,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
   const [currentPage, setCurrentPage] = useState(1)
+  const [tempPdfId, setTempPdfId] = useState<string | null>(null)
   const [totalPages, setTotalPages] = useState(1)
 
   // Load PDF.js when component mounts
@@ -345,6 +348,14 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     }
 
     setSelectedFile(file)
+    setTempPdfId(null) // Reset tempPdfId for new file
+
+    // Store PDF in tempDocumentStorage
+    if (file.type === "application/pdf") {
+      const newTempPdfId = tempDocumentStorage.store(file)
+      setTempPdfId(newTempPdfId)
+      console.log("Stored PDF in temp storage with ID:", newTempPdfId)
+    }
 
     // Create preview for images and PDFs
     if (file.type.startsWith("image/")) {
@@ -651,6 +662,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
           ? `${formData.deliveryDate}T${formData.deliveryTime}`
           : formData.deliveryDate,
     }
+    processedData.tempPdfId = tempPdfId // Add tempPdfId
 
     onSubmit(processedData)
     resetForm()
@@ -673,6 +685,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     pendingPdfDataRef.current = null
     setCurrentPage(1)
     setTotalPages(1)
+    setTempPdfId(null)
 
     setFormData({
       reference: "",

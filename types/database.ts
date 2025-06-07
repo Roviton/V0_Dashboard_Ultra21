@@ -189,6 +189,7 @@ export interface Database {
           special_instructions: string | null
           dispatcher_notes: string | null
           manager_comments: string | null
+          rate_confirmation_pdf_id: string | null
           created_at: string
           updated_at: string
           completed_at: string | null
@@ -239,6 +240,7 @@ export interface Database {
           special_instructions?: string | null
           dispatcher_notes?: string | null
           manager_comments?: string | null
+          rate_confirmation_pdf_id?: string | null
           created_at?: string
           updated_at?: string
           completed_at?: string | null
@@ -289,6 +291,7 @@ export interface Database {
           special_instructions?: string | null
           dispatcher_notes?: string | null
           manager_comments?: string | null
+          rate_confirmation_pdf_id?: string | null
           created_at?: string
           updated_at?: string
           completed_at?: string | null

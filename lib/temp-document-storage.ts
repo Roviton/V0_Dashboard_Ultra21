@@ -52,6 +52,17 @@ class TempDocumentStorage {
     return doc ? doc.blobUrl : null
   }
 
+  updateLoadId(id: string, loadId: string): boolean {
+    const doc = this.documents.get(id)
+    if (doc) {
+      doc.loadId = loadId
+      this.documents.set(id, doc)
+      console.log(`Updated document ${id} with load ID: ${loadId}`)
+      return true
+    }
+    return false
+  }
+
   remove(id: string): boolean {
     const doc = this.documents.get(id)
     if (doc) {
@@ -98,6 +109,10 @@ class TempDocumentStorage {
 
   getAll(): TempDocument[] {
     return Array.from(this.documents.values())
+  }
+
+  getByLoadId(loadId: string): TempDocument[] {
+    return Array.from(this.documents.values()).filter((doc) => doc.loadId === loadId)
   }
 
   clear(): void {
