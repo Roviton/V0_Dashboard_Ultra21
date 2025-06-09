@@ -2,7 +2,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Companies table (multi-tenant)
-CREATE TABLE companies (
+CREATE TABLE IF NOT EXISTS companies (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     address TEXT,
@@ -15,7 +15,7 @@ CREATE TABLE companies (
 );
 
 -- Users table (Admin and Dispatchers)
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     email VARCHAR(255) UNIQUE NOT NULL,
@@ -31,7 +31,7 @@ CREATE TABLE users (
 );
 
 -- Equipment types for partial load logic
-CREATE TABLE equipment_types (
+CREATE TABLE IF NOT EXISTS equipment_types (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     name VARCHAR(100) NOT NULL,
@@ -43,7 +43,7 @@ CREATE TABLE equipment_types (
 );
 
 -- Drivers table
-CREATE TABLE drivers (
+CREATE TABLE IF NOT EXISTS drivers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
@@ -65,7 +65,7 @@ CREATE TABLE drivers (
 );
 
 -- Customers/Brokers table
-CREATE TABLE customers (
+CREATE TABLE IF NOT EXISTS customers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
@@ -87,8 +87,24 @@ CREATE TABLE customers (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Create load_status ENUM type if it doesn't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'load_status') THEN
+        CREATE TYPE public.load_status AS ENUM (
+            'new',
+            'assigned',
+            'accepted',
+            'refused',
+            'in_progress',
+            'completed',
+            'cancelled'
+        );
+    END IF;
+END$$;
+
 -- Loads table (core entity)
-CREATE TABLE loads (
+CREATE TABLE IF NOT EXISTS loads (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     load_number VARCHAR(100) NOT NULL,
@@ -135,7 +151,7 @@ CREATE TABLE loads (
     vehicle_model VARCHAR(100),
     
     -- Status and tracking
-    status VARCHAR(20) DEFAULT 'new' CHECK (status IN ('new', 'assigned', 'accepted', 'refused', 'in_progress', 'completed', 'cancelled')),
+    status public.load_status DEFAULT 'new', -- Use the ENUM type
     is_partial_load BOOLEAN DEFAULT false,
     parent_load_id UUID REFERENCES loads(id), -- for partial loads
     
@@ -159,7 +175,7 @@ CREATE TABLE loads (
 );
 
 -- Load-Driver assignments (many-to-many for team driving)
-CREATE TABLE load_drivers (
+CREATE TABLE IF NOT EXISTS load_drivers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     load_id UUID NOT NULL REFERENCES loads(id) ON DELETE CASCADE,
     driver_id UUID NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
@@ -171,18 +187,18 @@ CREATE TABLE load_drivers (
 );
 
 -- Load status history (audit trail)
-CREATE TABLE load_status_history (
+CREATE TABLE IF NOT EXISTS load_status_history (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     load_id UUID NOT NULL REFERENCES loads(id) ON DELETE CASCADE,
-    old_status VARCHAR(20),
-    new_status VARCHAR(20) NOT NULL,
+    old_status public.load_status, -- Use the ENUM type
+    new_status public.load_status NOT NULL, -- Use the ENUM type
     changed_by UUID NOT NULL REFERENCES users(id),
     change_reason TEXT,
     changed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Load timeline events
-CREATE TABLE load_timeline (
+CREATE TABLE IF NOT EXISTS load_timeline (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     load_id UUID NOT NULL REFERENCES loads(id) ON DELETE CASCADE,
     event_type VARCHAR(50) NOT NULL, -- 'arrived_pickup', 'departed_pickup', 'arrived_delivery', 'delivered'
@@ -195,7 +211,7 @@ CREATE TABLE load_timeline (
 );
 
 -- Communications table (AI emails, Telegram messages)
-CREATE TABLE communications (
+CREATE TABLE IF NOT EXISTS communications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     load_id UUID REFERENCES loads(id) ON DELETE CASCADE,
@@ -230,7 +246,7 @@ CREATE TABLE communications (
 );
 
 -- Customer payments tracking
-CREATE TABLE payments (
+CREATE TABLE IF NOT EXISTS payments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     customer_id UUID NOT NULL REFERENCES customers(id),
@@ -250,7 +266,7 @@ CREATE TABLE payments (
 );
 
 -- AI usage tracking
-CREATE TABLE ai_usage_tracking (
+CREATE TABLE IF NOT EXISTS ai_usage_tracking (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     user_id UUID REFERENCES users(id),
@@ -271,7 +287,7 @@ CREATE TABLE ai_usage_tracking (
 );
 
 -- OCR extracted data
-CREATE TABLE ocr_extractions (
+CREATE TABLE IF NOT EXISTS ocr_extractions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     load_id UUID NOT NULL REFERENCES loads(id) ON DELETE CASCADE,
     

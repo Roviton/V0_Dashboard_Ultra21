@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
 import { Upload, Loader2, CheckCircle2, AlertCircle, Wand2, X, FileText, ZoomIn, ZoomOut } from "lucide-react"
 import { tempDocumentStorage } from "@/lib/temp-document-storage"
@@ -45,6 +46,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [imageUrl, setImageUrl] = useState("")
   const [extractedData, setExtractedData] = useState<any>(null)
+  const [missingFields, setMissingFields] = useState<string[]>([])
   const [documentPreview, setDocumentPreview] = useState<string | null>(null)
   const [pdfDataUrl, setPdfDataUrl] = useState<string | null>(null)
   const [pdfScale, setPdfScale] = useState(1.0)
@@ -54,10 +56,10 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   const pdfDocRef = useRef<any>(null)
   const pendingPdfDataRef = useRef<string | null>(null)
   const [formData, setFormData] = useState({
-    // ... (existing formData fields)
     // Basic Load Information
     reference: "",
     loadNumber: "",
+    appointmentNumber: "",
     customer: "",
     brokerEmail: "",
     brokerPhone: "",
@@ -69,8 +71,10 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     originZip: "",
     pickupDate: "",
     pickupTime: "",
-    pickupContact: "",
-    pickupPhone: "",
+    pickupContactName: "",
+    pickupContactPhone: "",
+    pickupContactEmail: "",
+    pickupOperatingHours: "",
 
     // Destination Information
     destinationAddress: "",
@@ -79,8 +83,10 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     destinationZip: "",
     deliveryDate: "",
     deliveryTime: "",
-    deliveryContact: "",
-    deliveryPhone: "",
+    deliveryContactName: "",
+    deliveryContactPhone: "",
+    deliveryContactEmail: "",
+    deliveryOperatingHours: "",
 
     // Load Details
     commodity: "",
@@ -99,6 +105,8 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     // Additional Information
     specialInstructions: "",
     notes: "",
+    detentionPolicy: "",
+    accessorialCharges: "",
     hazmat: false,
     temperature: "",
     vin: "",
@@ -395,6 +403,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   const processDocument = async (dataUrl: string) => {
     setProcessingStatus("processing")
     setStatusMessage("Extracting load details from document...")
+    setMissingFields([])
 
     try {
       console.log("Sending document to API for processing...")
@@ -419,6 +428,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
           // Basic Information
           reference: result.data.loadNumber || prev.reference,
           loadNumber: result.data.loadNumber || prev.loadNumber,
+          appointmentNumber: result.data.appointmentNumber || prev.appointmentNumber,
           customer: result.data.broker?.name || result.data.consignee?.name || prev.customer,
           brokerEmail: result.data.broker?.email || prev.brokerEmail,
           brokerPhone: result.data.broker?.phone || prev.brokerPhone,
@@ -431,8 +441,12 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
           pickupDate: extractDateOnly(result.data.pickupDate) || prev.pickupDate,
           pickupTime:
             extractTimeOnly(result.data.pickupDate) ||
-            extractTimeFromInstructions(result.data.specialInstructions, "pickup") ||
-            "", // Don't set default time
+            extractTimeFromInstructions(result.data.pickupLocation?.operatingHours, "pickup") ||
+            "",
+          pickupContactName: result.data.pickupLocation?.contactName || prev.pickupContactName,
+          pickupContactPhone: result.data.pickupLocation?.contactPhone || prev.pickupContactPhone,
+          pickupContactEmail: result.data.pickupLocation?.contactEmail || prev.pickupContactEmail,
+          pickupOperatingHours: result.data.pickupLocation?.operatingHours || prev.pickupOperatingHours,
 
           // Destination/Delivery Information
           destinationAddress: result.data.deliveryLocation?.address || prev.destinationAddress,
@@ -442,14 +456,19 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
           deliveryDate: extractDateOnly(result.data.deliveryDate) || prev.deliveryDate,
           deliveryTime:
             extractTimeOnly(result.data.deliveryDate) ||
-            extractTimeFromInstructions(result.data.specialInstructions, "delivery") ||
-            "", // Don't set default time
+            extractTimeFromInstructions(result.data.deliveryLocation?.operatingHours, "delivery") ||
+            "",
+          deliveryContactName: result.data.deliveryLocation?.contactName || prev.deliveryContactName,
+          deliveryContactPhone: result.data.deliveryLocation?.contactPhone || prev.deliveryContactPhone,
+          deliveryContactEmail: result.data.deliveryLocation?.contactEmail || prev.deliveryContactEmail,
+          deliveryOperatingHours: result.data.deliveryLocation?.operatingHours || prev.deliveryOperatingHours,
 
           // Load Details
           commodity: result.data.commodity || prev.commodity,
           weight: result.data.weight ? `${result.data.weight}` : prev.weight,
           rate: result.data.rate ? `${result.data.rate}` : prev.rate,
           vin: result.data.vin || prev.vin,
+          dimensions: result.data.dimensions || prev.dimensions,
 
           // Driver Information
           driverName: result.data.driver?.name || prev.driverName,
@@ -458,7 +477,17 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
           // Additional Information
           specialInstructions: result.data.specialInstructions || prev.specialInstructions,
           notes: result.data.specialInstructions || prev.notes,
+          detentionPolicy: result.data.detentionPolicy || prev.detentionPolicy,
+          accessorialCharges: result.data.accessorialCharges || prev.accessorialCharges,
         }))
+
+        // Check for missing fields
+        const missing: string[] = []
+        if (!result.data.pickupLocation?.operatingHours) missing.push("Pickup Hours")
+        if (!result.data.deliveryLocation?.operatingHours) missing.push("Delivery Hours")
+        if (!result.data.detentionPolicy) missing.push("Detention Policy")
+        if (!result.data.dimensions) missing.push("Dimensions")
+        setMissingFields(missing)
 
         setProcessingStatus("success")
         setStatusMessage(
@@ -552,54 +581,17 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   const extractTimeFromInstructions = (instructions: string | null, type: "pickup" | "delivery"): string => {
     if (!instructions) return ""
 
-    // Enhanced time patterns
-    const timePatterns = [
-      /(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)/gi,
-      /(\d{1,2}):(\d{2})/g,
-      /(\d{1,2})\s*(AM|PM|am|pm)/gi,
-      /between\s+(\d{1,2}):?(\d{2})?\s*(AM|PM|am|pm)?\s*-?\s*and\s+(\d{1,2}):?(\d{2})?\s*(AM|PM|am|pm)?/gi,
-      /after\s+(\d{1,2}):?(\d{2})?\s*(AM|PM|am|pm)?/gi,
-      /before\s+(\d{1,2}):?(\d{2})?\s*(AM|PM|am|pm)?/gi,
-      /ready\s+at\s+(\d{1,2}):?(\d{2})?\s*(AM|PM|am|pm)?/gi,
-      /open\s+(\d{1,2}):?(\d{2})?\s*(AM|PM|am|pm)?/gi,
-      /close\s+(\d{1,2}):?(\d{2})?\s*(AM|PM|am|pm)?/gi,
+    // Look for specific appointment times first
+    const apptPatterns = [
+      /appt at (\d{1,2}:?\d{2}\s*[ap]m)/i,
+      /appointment at (\d{1,2}:?\d{2}\s*[ap]m)/i,
+      /(\d{1,2}:?\d{2}\s*[ap]m) appt/i,
     ]
 
-    // Look for type-specific keywords
-    const typeKeywords =
-      type === "pickup"
-        ? ["pickup", "pick up", "ready", "available", "open", "shipper"]
-        : ["delivery", "deliver", "close", "closing", "appointment", "consignee"]
-
-    const lines = instructions.split(/[.\n]/)
-
-    for (const line of lines) {
-      const lowerLine = line.toLowerCase()
-
-      // Check if this line mentions the type we're looking for
-      const hasTypeKeyword = typeKeywords.some((keyword) => lowerLine.includes(keyword))
-
-      if (hasTypeKeyword) {
-        for (const pattern of timePatterns) {
-          const match = pattern.exec(line)
-          if (match) {
-            let hour = Number.parseInt(match[1])
-            const minute = match[2] ? Number.parseInt(match[2]) : 0
-            const ampm = match[3] || match[6] // Could be in different positions
-
-            // Convert to 24-hour format
-            if (ampm && ampm.toLowerCase() === "pm" && hour !== 12) {
-              hour += 12
-            } else if (ampm && ampm.toLowerCase() === "am" && hour === 12) {
-              hour = 0
-            }
-
-            // Validate reasonable hours
-            if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
-              return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`
-            }
-          }
-        }
+    for (const pattern of apptPatterns) {
+      const match = instructions.match(pattern)
+      if (match && match[1]) {
+        return extractTimeOnly(match[1])
       }
     }
 
@@ -676,6 +668,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     setSelectedFile(null)
     setImageUrl("")
     setExtractedData(null)
+    setMissingFields([])
     setDocumentPreview(null)
     setPdfDataUrl(null)
     setPdfScale(1.0)
@@ -690,6 +683,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     setFormData({
       reference: "",
       loadNumber: "",
+      appointmentNumber: "",
       customer: "",
       brokerEmail: "",
       brokerPhone: "",
@@ -699,16 +693,20 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
       originZip: "",
       pickupDate: "",
       pickupTime: "",
-      pickupContact: "",
-      pickupPhone: "",
+      pickupContactName: "",
+      pickupContactPhone: "",
+      pickupContactEmail: "",
+      pickupOperatingHours: "",
       destinationAddress: "",
       destinationCity: "",
       destinationState: "",
       destinationZip: "",
       deliveryDate: "",
       deliveryTime: "",
-      deliveryContact: "",
-      deliveryPhone: "",
+      deliveryContactName: "",
+      deliveryContactPhone: "",
+      deliveryContactEmail: "",
+      deliveryOperatingHours: "",
       commodity: "",
       weight: "",
       pieces: "",
@@ -721,6 +719,8 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
       driverEmail: "",
       specialInstructions: "",
       notes: "",
+      detentionPolicy: "",
+      accessorialCharges: "",
       hazmat: false,
       temperature: "",
       vin: "",
@@ -965,10 +965,14 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
             <Input id="loadNumber" value={formData.loadNumber} onChange={handleInputChange} />
           </div>
           <div className="space-y-2">
+            <Label htmlFor="appointmentNumber">Appointment Number</Label>
+            <Input id="appointmentNumber" value={formData.appointmentNumber} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
             <Label htmlFor="customer">Customer/Broker *</Label>
             <Input id="customer" value={formData.customer} onChange={handleInputChange} />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2 col-span-2">
             <Label htmlFor="brokerEmail">Broker Email</Label>
             <Input id="brokerEmail" type="email" value={formData.brokerEmail} onChange={handleInputChange} />
           </div>
@@ -1065,13 +1069,22 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
               placeholder="HH:MM"
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="pickupContact">Pickup Contact</Label>
-            <Input id="pickupContact" value={formData.pickupContact} onChange={handleInputChange} />
+          <div className="space-y-2 col-span-2">
+            <Label htmlFor="pickupOperatingHours">Pickup Hours</Label>
+            <Input
+              id="pickupOperatingHours"
+              value={formData.pickupOperatingHours}
+              onChange={handleInputChange}
+              placeholder="e.g., Mon-Fri 8 AM - 5 PM, FCFS"
+            />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="pickupPhone">Pickup Phone</Label>
-            <Input id="pickupPhone" value={formData.pickupPhone} onChange={handleInputChange} />
+            <Label htmlFor="pickupContactName">Pickup Contact Name</Label>
+            <Input id="pickupContactName" value={formData.pickupContactName} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pickupContactPhone">Pickup Contact Phone</Label>
+            <Input id="pickupContactPhone" value={formData.pickupContactPhone} onChange={handleInputChange} />
           </div>
         </div>
       </div>
@@ -1169,13 +1182,22 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
               placeholder="HH:MM"
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="deliveryContact">Delivery Contact</Label>
-            <Input id="deliveryContact" value={formData.deliveryContact} onChange={handleInputChange} />
+          <div className="space-y-2 col-span-2">
+            <Label htmlFor="deliveryOperatingHours">Delivery Hours</Label>
+            <Input
+              id="deliveryOperatingHours"
+              value={formData.deliveryOperatingHours}
+              onChange={handleInputChange}
+              placeholder="e.g., Mon-Fri 8 AM - 5 PM, Appt. Only"
+            />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="deliveryPhone">Delivery Phone</Label>
-            <Input id="deliveryPhone" value={formData.deliveryPhone} onChange={handleInputChange} />
+            <Label htmlFor="deliveryContactName">Delivery Contact Name</Label>
+            <Input id="deliveryContactName" value={formData.deliveryContactName} onChange={handleInputChange} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="deliveryContactPhone">Delivery Contact Phone</Label>
+            <Input id="deliveryContactPhone" value={formData.deliveryContactPhone} onChange={handleInputChange} />
           </div>
         </div>
       </div>
@@ -1256,6 +1278,24 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
       <div className="space-y-4">
         <h3 className="text-lg font-semibold">Additional Information</h3>
         <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="detentionPolicy">Detention Policy</Label>
+            <Input
+              id="detentionPolicy"
+              value={formData.detentionPolicy}
+              onChange={handleInputChange}
+              placeholder="e.g., $75/hr after 2 hours free"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="accessorialCharges">Accessorial Charges</Label>
+            <Input
+              id="accessorialCharges"
+              value={formData.accessorialCharges}
+              onChange={handleInputChange}
+              placeholder="e.g., Lumper fee: $150"
+            />
+          </div>
           <div className="space-y-2">
             <Label htmlFor="specialInstructions">Special Instructions</Label>
             <Textarea
@@ -1389,6 +1429,16 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
                             the load.
                           </p>
                         </div>
+                        {missingFields.length > 0 && (
+                          <Alert variant="destructive">
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertTitle>Missing Information</AlertTitle>
+                            <AlertDescription>
+                              The AI could not find the following fields. Please review the document and fill them in
+                              manually: {missingFields.join(", ")}.
+                            </AlertDescription>
+                          </Alert>
+                        )}
                         {renderFormFields()}
                       </div>
                     )}

@@ -7,6 +7,7 @@ import { AI_MODELS } from "./ai-config"
 // Schemas for structured data extraction - allowing null values
 export const billOfLadingSchema = z.object({
   loadNumber: z.string().nullable().optional(),
+  appointmentNumber: z.string().nullable().optional(),
   pickupDate: z.string().nullable().optional(),
   deliveryDate: z.string().nullable().optional(),
   carrier: z
@@ -40,6 +41,10 @@ export const billOfLadingSchema = z.object({
       city: z.string().nullable().optional(),
       state: z.string().nullable().optional(),
       zip: z.string().nullable().optional(),
+      contactName: z.string().nullable().optional(),
+      contactPhone: z.string().nullable().optional(),
+      contactEmail: z.string().nullable().optional(),
+      operatingHours: z.string().nullable().optional(),
     })
     .nullable()
     .optional(),
@@ -49,6 +54,10 @@ export const billOfLadingSchema = z.object({
       city: z.string().nullable().optional(),
       state: z.string().nullable().optional(),
       zip: z.string().nullable().optional(),
+      contactName: z.string().nullable().optional(),
+      contactPhone: z.string().nullable().optional(),
+      contactEmail: z.string().nullable().optional(),
+      operatingHours: z.string().nullable().optional(),
     })
     .nullable()
     .optional(),
@@ -56,6 +65,9 @@ export const billOfLadingSchema = z.object({
   vin: z.string().nullable().optional(),
   weight: z.number().nullable().optional(),
   rate: z.number().nullable().optional(),
+  dimensions: z.string().nullable().optional(),
+  detentionPolicy: z.string().nullable().optional(),
+  accessorialCharges: z.string().nullable().optional(),
   driver: z
     .object({
       name: z.string().nullable().optional(),
@@ -117,64 +129,47 @@ export async function extractBillOfLadingData(dataUrl: string) {
       throw new Error("Only image and PDF data URLs are supported.")
     }
 
-    const systemPrompt = `You are an expert at extracting structured data from freight documents like bills of lading, rate confirmations, and shipping documents.
+    const systemPrompt = `You are an expert at extracting structured data from freight documents like bills of lading and rate confirmations.
 
 IMPORTANT DOCUMENT STRUCTURE UNDERSTANDING:
-- The company with MC number at the top is usually the CARRIER/FREIGHT COMPANY
-- The "BILL TO" company is usually the BROKER/SHIPPER who arranged the load
-- "ORIGIN" and "DESTINATION" are pickup and delivery locations (different from company addresses)
-- Driver information is usually separate from company information
-- Look for load numbers, reference numbers, or confirmation numbers
+- The company with an MC number is usually the CARRIER/FREIGHT COMPANY.
+- The "BILL TO" company is usually the BROKER/SHIPPER who arranged the load.
+- "ORIGIN" and "DESTINATION" are pickup and delivery locations, distinct from company addresses.
+- Driver information is separate from company contacts.
+- Look for load numbers, reference numbers, or confirmation numbers.
+
+ADDITIONAL EXTRACTION RULES:
+- **Pickup/Delivery Hours vs. Appointment Time**:
+  - If you see a time range or operating hours (e.g., "Mon-Fri 8am-5pm", "Hours: 0800-1700"), extract that full string into the 'operatingHours' field for the respective location.
+  - If you see a SPECIFIC appointment time (e.g., "Appt at 2 PM", "Pickup time: 14:00 sharp"), extract that time and populate the main 'pickupDate' or 'deliveryDate' field with the full ISO date and time if possible. Also, note the appointment in the 'operatingHours' field (e.g., "Appointment at 2 PM").
+  - If you see "FCFS", "First Come First Served", or "By Appointment", put that text in the 'operatingHours' field.
+- **Location Contacts**: Look for contact names, phones, or emails specifically associated with the pickup or delivery location, which may be different from the main broker/carrier contacts.
+- **Detention & Accessorials**: Extract any text describing detention policies (free time, hourly rate) into 'detentionPolicy'. Extract any other accessorial charges mentioned (e.g., lumper fee, liftgate) into 'accessorialCharges'.
+- **Dimensions**: Extract load dimensions (L, W, H) as a single string into the 'dimensions' field.
+- **Appointment/Reference Numbers**: Extract any additional numbers labeled as "Appointment #", "Reference #", "PO #", etc., into the 'appointmentNumber' field.
 
 Extract ALL relevant information and return it as a JSON object with this exact structure:
 {
   "loadNumber": "string or null",
-  "pickupDate": "YYYY-MM-DD or null",
-  "deliveryDate": "YYYY-MM-DD or null",
-  "carrier": {
-    "name": "string (company with MC number) or null",
-    "address": "string or null",
-    "city": "string or null", 
-    "state": "string or null",
-    "zip": "string or null",
-    "mcNumber": "string or null",
-    "phone": "string or null",
-    "email": "string or null"
-  },
-  "broker": {
-    "name": "string (BILL TO company) or null",
-    "address": "string or null",
-    "city": "string or null",
-    "state": "string or null", 
-    "zip": "string or null",
-    "phone": "string or null",
-    "email": "string or null"
-  },
-  "pickupLocation": {
-    "address": "string (ORIGIN address) or null",
-    "city": "string or null",
-    "state": "string or null",
-    "zip": "string or null"
-  },
-  "deliveryLocation": {
-    "address": "string (DESTINATION address) or null", 
-    "city": "string or null",
-    "state": "string or null",
-    "zip": "string or null"
-  },
+  "appointmentNumber": "string or null",
+  "pickupDate": "YYYY-MM-DDTHH:mm:ss or null",
+  "deliveryDate": "YYYY-MM-DDTHH:mm:ss or null",
+  "carrier": { "name": "string", "address": "string", "city": "string", "state": "string", "zip": "string", "mcNumber": "string", "phone": "string", "email": "string" },
+  "broker": { "name": "string", "address": "string", "city": "string", "state": "string", "zip": "string", "phone": "string", "email": "string" },
+  "pickupLocation": { "address": "string", "city": "string", "state": "string", "zip": "string", "contactName": "string", "contactPhone": "string", "contactEmail": "string", "operatingHours": "string" },
+  "deliveryLocation": { "address": "string", "city": "string", "state": "string", "zip": "string", "contactName": "string", "contactPhone": "string", "contactEmail": "string", "operatingHours": "string" },
   "commodity": "string or null",
-  "vin": "string (if vehicle transport) or null",
+  "vin": "string or null",
   "weight": "number in pounds or null",
   "rate": "number in USD or null",
-  "driver": {
-    "name": "string (driver name, not company) or null",
-    "phone": "string or null"
-  },
+  "dimensions": "string or null",
+  "detentionPolicy": "string or null",
+  "accessorialCharges": "string or null",
+  "driver": { "name": "string", "phone": "string" },
   "specialInstructions": "string or null"
 }
 
-IMPORTANT: Use null for any fields you cannot find. Do not use empty strings or undefined.
-Return ONLY the JSON object, no other text.`
+IMPORTANT: Use null for any fields you cannot find. Do not use empty strings or undefined. Return ONLY the JSON object, no other text.`
 
     // Check API key availability first
     const openaiKey = process.env.OPENAI_API_KEY
@@ -374,8 +369,9 @@ Return ONLY the JSON object, no other text.`
 function getSampleBillOfLadingData(): BillOfLadingData {
   return {
     loadNumber: "FL-2024-001",
-    pickupDate: "2024-01-15",
-    deliveryDate: "2024-01-17",
+    appointmentNumber: "PO-12345",
+    pickupDate: "2024-01-15T09:00:00",
+    deliveryDate: "2024-01-17T14:00:00",
     carrier: {
       name: "Forward Strong LLC",
       address: "123 Transport Ave",
@@ -400,22 +396,33 @@ function getSampleBillOfLadingData(): BillOfLadingData {
       city: "Houston",
       state: "TX",
       zip: "77001",
+      contactName: "John Doe",
+      contactPhone: "(555) 111-2222",
+      contactEmail: "shipping@manufacturing.com",
+      operatingHours: "Mon-Fri 8 AM - 5 PM",
     },
     deliveryLocation: {
       address: "321 Distribution Way",
       city: "Miami",
       state: "FL",
       zip: "33101",
+      contactName: "Jane Smith",
+      contactPhone: "(555) 333-4444",
+      contactEmail: "receiving@distribution.com",
+      operatingHours: "Appointment at 2 PM",
     },
     commodity: "Auto Parts",
     vin: null,
     weight: 15000,
     rate: 2500,
+    dimensions: '48\'L x 102"W x 110"H',
+    detentionPolicy: "$75/hr after 2 hours free",
+    accessorialCharges: "Lumper fee: $150",
     driver: {
       name: "John Smith",
       phone: "(555) 555-0123",
     },
-    specialInstructions: "Handle with care - fragile auto parts",
+    specialInstructions: "Handle with care - fragile auto parts. Check in at guard shack upon arrival.",
   }
 }
 
@@ -478,7 +485,11 @@ I wanted to update you on load ${loadNumber}. Our driver ${driverName} has succe
 Current Status: En Route
 Pickup Completed: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
 Estimated Delivery: ${loadDetails.deliveryDate || "TBD"}
-Route: ${loadDetails.pickupLocation?.address || "Pickup Location"}, ${loadDetails.pickupLocation?.city || ""} ${loadDetails.pickupLocation?.state || ""} → ${loadDetails.deliveryLocation?.address || "Delivery Location"}, ${loadDetails.deliveryLocation?.city || ""} ${loadDetails.deliveryLocation?.state || ""}
+Route: ${loadDetails.pickupLocation?.address || "Pickup Location"}, ${loadDetails.pickupLocation?.city || ""} ${
+      loadDetails.pickupLocation?.state || ""
+    } → ${loadDetails.deliveryLocation?.address || "Delivery Location"}, ${
+      loadDetails.deliveryLocation?.city || ""
+    } ${loadDetails.deliveryLocation?.state || ""}
 
 The load is secure and we're tracking progress in real-time. I'll send another update when the driver arrives at the delivery location.
 

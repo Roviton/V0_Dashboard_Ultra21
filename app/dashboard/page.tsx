@@ -17,7 +17,8 @@ import { ModalProvider } from "@/components/modal-provider"
 
 export default function DashboardPage() {
   const [isNewLoadModalOpen, setIsNewLoadModalOpen] = useState(false)
-  const { loads, loading, error, createLoad, updateLoadStatus, assignDriver } = useLoads()
+  // This instance of useLoads is for the 'active' view
+  const { loads, loading, error, createLoad, updateLoadStatus, assignDriver } = useLoads({ viewMode: "active" })
   const { user } = useAuth()
   const router = useRouter()
   const { toast } = useToast()
@@ -27,22 +28,6 @@ export default function DashboardPage() {
       router.push("/dashboard/admin")
     }
   }, [user, router])
-
-  // Filter for active loads only (new and in_transit)
-  const activeLoads = loads.filter(
-    (load) =>
-      load.status === "new" ||
-      load.status === "assigned" ||
-      load.status === "accepted" ||
-      load.status === "in_progress",
-  )
-
-  console.log("All loads:", loads)
-  console.log("Active loads:", activeLoads)
-  console.log(
-    "Load statuses:",
-    loads.map((load) => ({ id: load.id, status: load.status, load_number: load.load_number })),
-  )
 
   const handleEditLoad = (load: any) => {
     console.log("Edit load:", load)
@@ -143,7 +128,7 @@ export default function DashboardPage() {
               </div>
             ) : (
               <LoadsDataTable
-                loads={activeLoads}
+                loads={loads}
                 loading={loading}
                 error={error}
                 onUpdateStatus={updateLoadStatus}
