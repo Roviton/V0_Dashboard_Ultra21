@@ -31,9 +31,15 @@ import {
   CheckCircle,
   XCircle,
   ArrowUpDown,
+  Package,
+  Building,
+  Truck,
+  MapPin,
 } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { useToast } from "@/hooks/use-toast"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 
 interface Load {
   id: string
@@ -67,6 +73,16 @@ interface Load {
   rate_confirmation_pdf_url?: string | null
   rate_confirmation_pdf_id?: string | null // Legacy
   // Add other fields as necessary
+  equipment_type?: string | null
+  pieces?: number | null
+  special_instructions?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  appointment_number?: string | null
+  notes?: string | null
+  comments?: string | null
+  pickup_zip?: string | null
+  delivery_zip?: string | null
 }
 
 interface LoadsDataTableProps {
@@ -97,19 +113,28 @@ export function LoadsDataTable({
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const { onOpen } = useModal()
   const canvasRefs = useRef<Map<string, HTMLCanvasElement>>(new Map())
+  const canvasContainerRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const pdfDocRefs = useRef<Map<string, any>>(new Map())
   const [pdfScales, setPdfScales] = useState<Map<string, number>>(new Map())
   const [pdfLoaded, setPdfLoaded] = useState<Map<string, boolean>>(new Map())
   const [currentPages, setCurrentPages] = useState<Map<string, number>>(new Map())
   const [totalPages, setTotalPages] = useState<Map<string, number>>(new Map())
   const [pdfErrors, setPdfErrors] = useState<Map<string, string>>(new Map())
+  const [pdfJsReady, setPdfJsReady] = useState(false)
   const { toast } = useToast()
   const [sorting, setSorting] = useState<SortingState>([])
+  const [canvasCreationAttempts, setCanvasCreationAttempts] = useState<Map<string, number>>(new Map())
+  const maxCanvasAttempts = 5
 
   // Load PDF.js when component mounts
   useEffect(() => {
     const loadPDFJS = async () => {
-      if (typeof window !== "undefined" && !window.pdfjsLib) {
+      if (typeof window !== "undefined") {
+        if (window.pdfjsLib) {
+          setPdfJsReady(true)
+          return
+        }
+
         try {
           const script = document.createElement("script")
           script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
@@ -117,14 +142,18 @@ export function LoadsDataTable({
             if (window.pdfjsLib) {
               window.pdfjsLib.GlobalWorkerOptions.workerSrc =
                 "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"
+              setPdfJsReady(true)
+              console.log("PDF.js loaded successfully")
             }
           }
           script.onerror = () => {
             console.error("Failed to load PDF.js")
+            setPdfJsReady(false)
           }
           document.head.appendChild(script)
         } catch (error) {
           console.error("Error loading PDF.js:", error)
+          setPdfJsReady(false)
         }
       }
     }
@@ -147,80 +176,103 @@ export function LoadsDataTable({
       if (load) {
         // Only load PDF if it's an active load and has PDF capability
         if (isActiveLoad(load.status)) {
-          setTimeout(() => loadPdfForLoad(load), 100)
+          // Reset canvas creation attempts for this load
+          setCanvasCreationAttempts((prev) => {
+            const newMap = new Map(prev)
+            newMap.set(loadId, 0)
+            return newMap
+          })
+
+          // Wait for the DOM to update before trying to render
+          setTimeout(() => initializeDocumentForLoad(load), 500)
         }
       }
     }
     setExpandedRows(newExpandedRows)
   }
 
-  const loadPdfForLoad = async (load: Load) => {
-    if (!load) return
+  const initializeDocumentForLoad = async (load: Load) => {
+    console.log("Initializing document for load:", load.id)
 
-    const pdfUrl = load.rate_confirmation_pdf_url || load.rate_confirmation_pdf_id
-    const canvas = canvasRefs.current.get(load.id)
-
-    if (!canvas) {
-      console.log(`Canvas for load ${load.id} not ready, will retry or skip PDF rendering.`)
-      // Optionally, set a state to retry or inform the user
-      return
-    }
-
+    // Reset states
     setPdfLoaded((prev) => new Map(prev).set(load.id, false))
     setPdfErrors((prev) => new Map(prev).set(load.id, ""))
     setPdfScales((prev) => new Map(prev).set(load.id, 1.0))
     setCurrentPages((prev) => new Map(prev).set(load.id, 1))
+    setTotalPages((prev) => new Map(prev).set(load.id, 1))
 
-    if (!pdfUrl) {
-      console.log("No PDF URL for load:", load.id, "Rendering fallback.")
+    // Create canvas if it doesn't exist
+    const canvasContainer = canvasContainerRefs.current.get(load.id)
+    if (!canvasContainer) {
+      console.log("Canvas container not found for load:", load.id)
+      setPdfErrors((prev) => new Map(prev).set(load.id, "Canvas container not found"))
+      return
+    }
+
+    // Check if we need to create a canvas
+    if (!canvasRefs.current.has(load.id)) {
+      try {
+        const canvas = document.createElement("canvas")
+        canvas.className = "border border-gray-300 shadow-lg bg-white rounded"
+        canvas.style.maxWidth = "100%"
+        canvas.style.height = "auto"
+
+        // Clear container and append new canvas
+        while (canvasContainer.firstChild) {
+          canvasContainer.removeChild(canvasContainer.firstChild)
+        }
+        canvasContainer.appendChild(canvas)
+        canvasRefs.current.set(load.id, canvas)
+        console.log("Canvas created for load:", load.id)
+      } catch (error) {
+        console.error("Error creating canvas:", error)
+        setPdfErrors((prev) => new Map(prev).set(load.id, "Failed to create canvas"))
+        return
+      }
+    }
+
+    const pdfUrl = load.rate_confirmation_pdf_url || load.rate_confirmation_pdf_id
+
+    // If no PDF URL or PDF.js not ready, render fallback immediately
+    if (!pdfUrl || !pdfJsReady) {
+      console.log("No PDF URL or PDF.js not ready, rendering fallback for load:", load.id)
       await renderFallbackDocument(load)
       return
     }
+
+    // Try to load actual PDF
+    try {
+      await loadActualPdf(load, pdfUrl)
+    } catch (error: any) {
+      console.error("Failed to load PDF, falling back to generated document:", error)
+      await renderFallbackDocument(load)
+    }
+  }
+
+  const loadActualPdf = async (load: Load, pdfUrl: string) => {
+    console.log("Loading actual PDF for load:", load.id, "URL:", pdfUrl)
 
     if (!window.pdfjsLib) {
-      console.error("PDF.js not loaded. Rendering fallback.")
-      await renderFallbackDocument(load)
-      return
+      throw new Error("PDF.js not available")
     }
 
-    try {
-      let pdfData: Uint8Array
-      if (pdfUrl.startsWith("blob:") || pdfUrl.startsWith("http")) {
-        // Handle blob URLs from temp storage or direct HTTP URLs
-        const response = await fetch(pdfUrl)
-        if (!response.ok) throw new Error(`Failed to fetch PDF: ${response.statusText}`)
-        const arrayBuffer = await response.arrayBuffer()
-        pdfData = new Uint8Array(arrayBuffer)
-      } else if (typeof window !== "undefined" && window.tempDocumentStorage) {
-        // Legacy temp storage ID
-        const tempDoc = window.tempDocumentStorage.get(pdfUrl)
-        if (tempDoc && tempDoc.blobUrl) {
-          const response = await fetch(tempDoc.blobUrl)
-          if (!response.ok) throw new Error(`Failed to fetch PDF from temp storage: ${response.statusText}`)
-          const arrayBuffer = await response.arrayBuffer()
-          pdfData = new Uint8Array(arrayBuffer)
-        } else {
-          throw new Error("PDF document not found in temp storage")
-        }
-      } else {
-        throw new Error("Unsupported PDF URL format or temp storage not available")
-      }
+    const loadingTask = window.pdfjsLib.getDocument({
+      url: pdfUrl,
+      httpHeaders: {
+        Accept: "application/pdf",
+      },
+    })
 
-      const loadingTask = window.pdfjsLib.getDocument({ data: pdfData })
-      const pdf = await loadingTask.promise
-      pdfDocRefs.current.set(load.id, pdf)
-      setTotalPages((prev) => new Map(prev).set(load.id, pdf.numPages))
-      await renderPdfPage(load.id, 1)
-    } catch (error: any) {
-      console.error(`Error loading PDF for load ${load.id}:`, error)
-      setPdfErrors((prev) => new Map(prev).set(load.id, error.message || "Failed to load PDF"))
-      await renderFallbackDocument(load)
-      toast({
-        title: "PDF Loading Error",
-        description: "Could not load PDF. Showing generated document.",
-        variant: "destructive",
-      })
-    }
+    // Set a timeout for PDF loading
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("PDF loading timeout")), 15000) // 15 second timeout
+    })
+
+    const pdf = await Promise.race([loadingTask.promise, timeoutPromise])
+    pdfDocRefs.current.set(load.id, pdf)
+    setTotalPages((prev) => new Map(prev).set(load.id, pdf.numPages))
+    await renderPdfPage(load.id, 1)
+    console.log("PDF loaded and rendered successfully for load:", load.id)
   }
 
   const renderPdfPage = async (loadId: string, pageNumber: number) => {
@@ -228,7 +280,10 @@ export function LoadsDataTable({
     const canvas = canvasRefs.current.get(loadId)
     const scale = pdfScales.get(loadId) || 1.0
 
-    if (!pdfDoc || !canvas) return
+    if (!pdfDoc || !canvas) {
+      console.error("PDF doc or canvas not available for load:", loadId)
+      return
+    }
 
     try {
       const page = await pdfDoc.getPage(pageNumber)
@@ -236,8 +291,8 @@ export function LoadsDataTable({
       if (!context) throw new Error("Could not get canvas context")
 
       const viewport = page.getViewport({ scale: 1.0 })
-      const containerWidth = canvas.parentElement?.clientWidth || 550 // Use parent width for better fit
-      const fitScale = Math.min(containerWidth / viewport.width, scale) // Adjust scale to fit container
+      const containerWidth = canvas.parentElement?.clientWidth || 550
+      const fitScale = Math.min(containerWidth / viewport.width, scale)
       const scaledViewport = page.getViewport({ scale: fitScale })
 
       const devicePixelRatio = window.devicePixelRatio || 1
@@ -254,6 +309,8 @@ export function LoadsDataTable({
       setCurrentPages((prev) => new Map(prev).set(loadId, pageNumber))
       setPdfLoaded((prev) => new Map(prev).set(loadId, true))
       setPdfErrors((prev) => new Map(prev).set(loadId, ""))
+
+      console.log("PDF page rendered successfully for load:", loadId, "page:", pageNumber)
     } catch (error: any) {
       console.error(`Error rendering PDF page for load ${loadId}:`, error)
       setPdfLoaded((prev) => new Map(prev).set(loadId, false))
@@ -262,112 +319,175 @@ export function LoadsDataTable({
   }
 
   const renderFallbackDocument = async (load: Load) => {
+    console.log("Rendering fallback document for load:", load.id)
+
     const canvas = canvasRefs.current.get(load.id)
-    if (!canvas) return
+    if (!canvas) {
+      console.error("Canvas not available for fallback rendering:", load.id)
+      setPdfErrors((prev) => new Map(prev).set(load.id, "Canvas not available"))
+
+      // Try to create canvas again if we haven't exceeded max attempts
+      const attempts = canvasCreationAttempts.get(load.id) || 0
+      if (attempts < maxCanvasAttempts) {
+        setCanvasCreationAttempts((prev) => {
+          const newMap = new Map(prev)
+          newMap.set(load.id, attempts + 1)
+          return newMap
+        })
+
+        console.log(`Retrying canvas creation (attempt ${attempts + 1}/${maxCanvasAttempts})`)
+        setTimeout(() => initializeDocumentForLoad(load), 500)
+      } else {
+        // Mark as loaded anyway to show error state instead of loading spinner
+        setPdfLoaded((prev) => new Map(prev).set(load.id, true))
+      }
+      return
+    }
 
     const ctx = canvas.getContext("2d")
-    if (!ctx) return
+    if (!ctx) {
+      console.error("Canvas context not available for fallback rendering:", load.id)
+      setPdfErrors((prev) => new Map(prev).set(load.id, "Canvas context not available"))
+      setPdfLoaded((prev) => new Map(prev).set(load.id, true)) // Mark as loaded to show error
+      return
+    }
 
-    const scale = pdfScales.get(load.id) || 1.0
-    const baseWidth = 612
-    const baseHeight = 792
-    canvas.width = baseWidth * scale
-    canvas.height = baseHeight * scale
-    canvas.style.width = `${Math.min(canvas.parentElement?.clientWidth || 550, baseWidth * scale)}px`
-    canvas.style.height = "auto"
+    try {
+      const scale = pdfScales.get(load.id) || 1.0
+      const baseWidth = 612
+      const baseHeight = 792
 
-    ctx.scale(scale, scale)
-    ctx.fillStyle = "#ffffff"
-    ctx.fillRect(0, 0, baseWidth, baseHeight)
+      // Set canvas size
+      canvas.width = baseWidth * scale
+      canvas.height = baseHeight * scale
+      canvas.style.width = `${Math.min(canvas.parentElement?.clientWidth || 550, baseWidth * scale)}px`
+      canvas.style.height = "auto"
 
-    ctx.fillStyle = "#1f2937"
-    ctx.font = "bold 28px Arial"
-    ctx.textAlign = "center"
-    ctx.fillText("RATE CONFIRMATION", baseWidth / 2, 50)
-    ctx.font = "18px Arial"
-    ctx.fillText("TFI Transportation Services", baseWidth / 2, 85)
-    ctx.font = "14px Arial"
-    ctx.fillStyle = "#6b7280"
-    ctx.fillText("123 Logistics Way, Transport City, TX 75001", baseWidth / 2, 105)
-    ctx.fillText("Phone: (555) 123-4567 | Email: dispatch@tfi.com", baseWidth / 2, 125)
+      // Clear and scale context
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.scale(scale, scale)
 
-    ctx.textAlign = "left"
-    ctx.strokeStyle = "#e5e7eb"
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(50, 150)
-    ctx.lineTo(562, 150)
-    ctx.stroke()
+      // White background
+      ctx.fillStyle = "#ffffff"
+      ctx.fillRect(0, 0, baseWidth, baseHeight)
 
-    ctx.fillStyle = "#1f2937"
-    ctx.font = "bold 18px Arial"
-    ctx.fillText("LOAD INFORMATION", 50, 180)
-    ctx.font = "14px Arial"
-    ctx.fillStyle = "#374151"
-    const loadInfo = [
-      `Load Number: ${load.load_number || "N/A"}`,
-      `Reference: ${load.reference_number || "N/A"}`,
-      `Customer: ${getCustomerDisplay(load.customer)}`,
-      `Rate: ${formatCurrency(load.rate)}`,
-      `Commodity: ${load.commodity || "General Freight"}`,
-      `Weight: ${load.weight ? load.weight + " lbs" : "N/A"}`,
-    ]
-    loadInfo.forEach((info, index) => ctx.fillText(info, 50, 210 + index * 25))
+      // Header
+      ctx.fillStyle = "#1f2937"
+      ctx.font = "bold 28px Arial"
+      ctx.textAlign = "center"
+      ctx.fillText("RATE CONFIRMATION", baseWidth / 2, 50)
 
-    ctx.fillStyle = "#1f2937"
-    ctx.font = "bold 18px Arial"
-    ctx.fillText("PICKUP INFORMATION", 50, 380)
-    ctx.font = "14px Arial"
-    ctx.fillStyle = "#374151"
-    const pickupInfo = [
-      `Location: ${load.pickup_city || "N/A"}, ${load.pickup_state || "N/A"}`,
-      `Address: ${load.pickup_address || "N/A"}`,
-      `Date: ${load.pickup_date ? new Date(load.pickup_date).toLocaleDateString() : "N/A"}`,
-      `Time: ${load.pickup_time || "N/A"}`,
-      `Contact: ${load.pickup_contact_name || "N/A"}`,
-      `Phone: ${load.pickup_contact_phone || "(555) 123-4567"}`,
-    ]
-    pickupInfo.forEach((info, index) => ctx.fillText(info, 50, 410 + index * 25))
+      ctx.font = "18px Arial"
+      ctx.fillText("TFI Transportation Services", baseWidth / 2, 85)
 
-    ctx.fillStyle = "#1f2937"
-    ctx.font = "bold 18px Arial"
-    ctx.fillText("DELIVERY INFORMATION", 50, 570)
-    ctx.font = "14px Arial"
-    ctx.fillStyle = "#374151"
-    const deliveryInfo = [
-      `Location: ${load.delivery_city || "N/A"}, ${load.delivery_state || "N/A"}`,
-      `Address: ${load.delivery_address || "N/A"}`,
-      `Date: ${load.delivery_date ? new Date(load.delivery_date).toLocaleDateString() : "N/A"}`,
-      `Time: ${load.delivery_time || "N/A"}`,
-      `Contact: ${load.delivery_contact_name || "N/A"}`,
-      `Phone: ${load.delivery_contact_phone || "(555) 987-6543"}`,
-    ]
-    deliveryInfo.forEach((info, index) => ctx.fillText(info, 50, 600 + index * 25))
+      ctx.font = "14px Arial"
+      ctx.fillStyle = "#6b7280"
+      ctx.fillText("123 Logistics Way, Transport City, TX 75001", baseWidth / 2, 105)
+      ctx.fillText("Phone: (555) 123-4567 | Email: dispatch@tfi.com", baseWidth / 2, 125)
 
-    ctx.fillStyle = "#059669"
-    ctx.font = "bold 20px Arial"
-    ctx.textAlign = "center"
-    ctx.fillText(`TOTAL RATE: ${formatCurrency(load.rate)}`, baseWidth / 2, 730)
-    ctx.font = "12px Arial"
-    ctx.fillStyle = "#6b7280"
-    ctx.fillText("This rate confirmation is valid for 24 hours.", baseWidth / 2, 755)
-    ctx.fillText(`Generated on: ${new Date().toLocaleString()}`, baseWidth / 2, 775)
+      // Separator line
+      ctx.strokeStyle = "#e5e7eb"
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(50, 150)
+      ctx.lineTo(562, 150)
+      ctx.stroke()
 
-    ctx.strokeStyle = "#d1d5db"
-    ctx.lineWidth = 1
-    ctx.strokeRect(25, 25, baseWidth - 50, baseHeight - 50)
+      // Load Information Section
+      ctx.textAlign = "left"
+      ctx.fillStyle = "#1f2937"
+      ctx.font = "bold 18px Arial"
+      ctx.fillText("LOAD INFORMATION", 50, 180)
 
-    setPdfLoaded((prev) => new Map(prev).set(load.id, true))
-    setTotalPages((prev) => new Map(prev).set(load.id, 1))
-    setCurrentPages((prev) => new Map(prev).set(load.id, 1))
+      ctx.font = "14px Arial"
+      ctx.fillStyle = "#374151"
+      const loadInfo = [
+        `Load Number: ${load.load_number || "N/A"}`,
+        `Reference: ${load.reference_number || "N/A"}`,
+        `Customer: ${getCustomerDisplay(load.customer)}`,
+        `Rate: ${formatCurrency(load.rate)}`,
+        `Commodity: ${load.commodity || "General Freight"}`,
+        `Weight: ${load.weight ? load.weight + " lbs" : "N/A"}`,
+      ]
+      loadInfo.forEach((info, index) => {
+        ctx.fillText(info, 50, 210 + index * 25)
+      })
+
+      // Pickup Information Section
+      ctx.fillStyle = "#1f2937"
+      ctx.font = "bold 18px Arial"
+      ctx.fillText("PICKUP INFORMATION", 50, 380)
+
+      ctx.font = "14px Arial"
+      ctx.fillStyle = "#374151"
+      const pickupInfo = [
+        `Location: ${load.pickup_city || "N/A"}, ${load.pickup_state || "N/A"}`,
+        `Address: ${load.pickup_address || "N/A"}`,
+        `Date: ${load.pickup_date ? new Date(load.pickup_date).toLocaleDateString() : "N/A"}`,
+        `Time: ${load.pickup_time || "N/A"}`,
+        `Contact: ${load.pickup_contact_name || "N/A"}`,
+        `Phone: ${load.pickup_contact_phone || "(555) 123-4567"}`,
+      ]
+      pickupInfo.forEach((info, index) => {
+        ctx.fillText(info, 50, 410 + index * 25)
+      })
+
+      // Delivery Information Section
+      ctx.fillStyle = "#1f2937"
+      ctx.font = "bold 18px Arial"
+      ctx.fillText("DELIVERY INFORMATION", 50, 570)
+
+      ctx.font = "14px Arial"
+      ctx.fillStyle = "#374151"
+      const deliveryInfo = [
+        `Location: ${load.delivery_city || "N/A"}, ${load.delivery_state || "N/A"}`,
+        `Address: ${load.delivery_address || "N/A"}`,
+        `Date: ${load.delivery_date ? new Date(load.delivery_date).toLocaleDateString() : "N/A"}`,
+        `Time: ${load.delivery_time || "N/A"}`,
+        `Contact: ${load.delivery_contact_name || "N/A"}`,
+        `Phone: ${load.delivery_contact_phone || "(555) 987-6543"}`,
+      ]
+      deliveryInfo.forEach((info, index) => {
+        ctx.fillText(info, 50, 600 + index * 25)
+      })
+
+      // Footer
+      ctx.fillStyle = "#059669"
+      ctx.font = "bold 20px Arial"
+      ctx.textAlign = "center"
+      ctx.fillText(`TOTAL RATE: ${formatCurrency(load.rate)}`, baseWidth / 2, 730)
+
+      ctx.font = "12px Arial"
+      ctx.fillStyle = "#6b7280"
+      ctx.fillText("This rate confirmation is valid for 24 hours.", baseWidth / 2, 755)
+      ctx.fillText(`Generated on: ${new Date().toLocaleString()}`, baseWidth / 2, 775)
+
+      // Border
+      ctx.strokeStyle = "#d1d5db"
+      ctx.lineWidth = 1
+      ctx.strokeRect(25, 25, baseWidth - 50, baseHeight - 50)
+
+      // Mark as loaded
+      setPdfLoaded((prev) => new Map(prev).set(load.id, true))
+      setTotalPages((prev) => new Map(prev).set(load.id, 1))
+      setCurrentPages((prev) => new Map(prev).set(load.id, 1))
+      setPdfErrors((prev) => new Map(prev).set(load.id, ""))
+
+      console.log("Fallback document rendered successfully for load:", load.id)
+    } catch (error: any) {
+      console.error("Error rendering fallback document for load:", load.id, error)
+      setPdfErrors((prev) => new Map(prev).set(load.id, `Fallback render error: ${error.message}`))
+      setPdfLoaded((prev) => new Map(prev).set(load.id, true)) // Mark as loaded to show error
+    }
   }
 
   const handlePdfZoom = async (loadId: string, newScale: number) => {
     setPdfScales((prev) => new Map(prev).set(loadId, newScale))
     const currentPage = currentPages.get(loadId) || 1
     const pdfDoc = pdfDocRefs.current.get(loadId)
-    if (pdfDoc) await renderPdfPage(loadId, currentPage)
-    else {
+    if (pdfDoc) {
+      await renderPdfPage(loadId, currentPage)
+    } else {
       const load = loads.find((l) => l.id === loadId)
       if (load) await renderFallbackDocument(load)
     }
@@ -389,7 +509,7 @@ export function LoadsDataTable({
       const a = document.createElement("a")
       a.href = pdfUrl
       a.download = `rate-confirmation-${load.reference_number || load.load_number}.pdf`
-      a.target = "_blank" // Open in new tab for direct URLs to avoid issues
+      a.target = "_blank"
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -428,7 +548,6 @@ export function LoadsDataTable({
     try {
       return new Date(dateString).toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "numeric" })
     } catch {
-      // MM/DD/YYYY
       return "Invalid Date"
     }
   }
@@ -457,9 +576,8 @@ export function LoadsDataTable({
   }
 
   const getCustomerSubDisplay = (customer: any): string => {
-    // For the second line in customer cell, could be same as main or a different detail
     if (!customer) return ""
-    if (typeof customer === "string") return customer // Or an empty string if it's meant to be different
+    if (typeof customer === "string") return customer
     if (typeof customer === "object") return customer.name || customer.company_name || customer.customer_name || ""
     return ""
   }
@@ -481,7 +599,7 @@ export function LoadsDataTable({
             variant="ghost"
             size="sm"
             onClick={() => toggleRowExpansion(load.id, load.status)}
-            disabled={!canExpand && !isActiveLoad(load.status)} // Disable if not active and not already expanded
+            disabled={!canExpand && !isActiveLoad(load.status)}
             className="w-8 h-8 p-0 data-[state=open]:bg-muted"
             aria-label={expandedRows.has(load.id) ? "Collapse row" : "Expand row"}
           >
@@ -575,16 +693,14 @@ export function LoadsDataTable({
       cell: ({ row }) => {
         const status = row.original.status
         let badgeVariant: "default" | "secondary" | "destructive" | "outline" = "secondary"
-        if (status === "new") badgeVariant = "default" // Using default for "New" as per screenshot (light gray)
-        if (status === "assigned") badgeVariant = "default" // Using default for "Assigned" as per screenshot (blue)
+        if (status === "new") badgeVariant = "default"
+        if (status === "assigned") badgeVariant = "default"
         if (status === "completed") badgeVariant = "default"
         if (["cancelled", "refused"].includes(status)) badgeVariant = "destructive"
 
-        // Custom styling for badges to match screenshot
         const statusStyles: Record<string, string> = {
-          new: "bg-gray-200 text-gray-800 hover:bg-gray-300", // Light gray for "New"
-          assigned: "bg-blue-500 text-white hover:bg-blue-600", // Blue for "Assigned"
-          // Add other statuses if needed
+          new: "bg-gray-200 text-gray-800 hover:bg-gray-300",
+          assigned: "bg-blue-500 text-white hover:bg-blue-600",
         }
 
         return (
@@ -674,7 +790,8 @@ export function LoadsDataTable({
   const renderExpandedContent = (load: Load) => {
     const showRateConfirmation = isActiveLoad(load.status)
     const pdfUrl = load.rate_confirmation_pdf_url || load.rate_confirmation_pdf_id
-    const hasUploadedPdf = pdfUrl && pdfLoaded.get(load.id) && !pdfErrors.get(load.id)
+    const isLoading = !pdfLoaded.get(load.id) && !pdfErrors.get(load.id)
+    const hasError = !!pdfErrors.get(load.id)
 
     return (
       <TableRow key={`${load.id}-expanded`} className="bg-muted/20 hover:bg-muted/30">
@@ -701,9 +818,9 @@ export function LoadsDataTable({
                         <FileText className="h-5 w-5" />
                         <h3 className="text-lg font-semibold">Rate Confirmation</h3>
                         <Badge variant="outline">{formatCurrency(load.rate)}</Badge>
-                        {hasUploadedPdf && <Badge variant="secondary">Original PDF</Badge>}
-                        {!hasUploadedPdf && !pdfErrors.get(load.id) && <Badge variant="outline">Generated</Badge>}
-                        {pdfErrors.get(load.id) && <Badge variant="destructive">Error</Badge>}
+                        {pdfUrl && !hasError && <Badge variant="secondary">PDF Available</Badge>}
+                        {!pdfUrl && <Badge variant="outline">Generated</Badge>}
+                        {hasError && <Badge variant="destructive">Error</Badge>}
                       </div>
                       <div className="border rounded-lg bg-white min-h-[400px] flex flex-col">
                         <div className="flex items-center justify-between p-3 bg-gray-100 border-b">
@@ -712,7 +829,7 @@ export function LoadsDataTable({
                             <span className="text-sm font-medium text-gray-700 truncate">
                               Rate Conf - {load.reference_number || load.load_number}
                             </span>
-                            {pdfErrors.get(load.id) && (
+                            {hasError && (
                               <AlertCircle className="h-4 w-4 text-amber-500" title={pdfErrors.get(load.id)} />
                             )}
                           </div>
@@ -723,35 +840,45 @@ export function LoadsDataTable({
                         </div>
                         <div className="flex-1 overflow-auto bg-gray-50 p-4" style={{ maxHeight: "600px" }}>
                           <div className="flex justify-center min-h-full">
-                            {!pdfLoaded.get(load.id) && !pdfErrors.get(load.id) && (
+                            {isLoading && (
                               <div className="flex items-center justify-center w-full h-96 bg-white border border-gray-300 rounded">
                                 <div className="text-center">
                                   <Loader2 className="h-16 w-16 mx-auto mb-4 text-gray-300 animate-spin" />
                                   <p className="text-sm text-gray-500">
                                     {pdfUrl ? "Loading PDF..." : "Generating document..."}
                                   </p>
+                                  <p className="text-xs text-gray-400 mt-2">
+                                    Please wait while we prepare the document
+                                  </p>
                                 </div>
                               </div>
                             )}
-                            {pdfErrors.get(load.id) &&
-                              !pdfLoaded.get(load.id) && ( // Show error if loading failed before canvas render
-                                <div className="flex items-center justify-center w-full h-96 bg-white border border-gray-300 rounded text-red-500">
-                                  <AlertCircle className="h-8 w-8 mr-2" /> Failed to load/render document.
-                                </div>
-                              )}
-                            <canvas
+                            {hasError && (
+                              <div className="flex flex-col items-center justify-center w-full h-96 bg-white border border-gray-300 rounded text-red-500">
+                                <AlertCircle className="h-8 w-8 mb-2" />
+                                <p className="text-sm">Failed to load document</p>
+                                <p className="text-xs text-gray-500 mt-1">{pdfErrors.get(load.id)}</p>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="mt-4"
+                                  onClick={() => initializeDocumentForLoad(load)}
+                                >
+                                  Retry
+                                </Button>
+                              </div>
+                            )}
+                            <div
                               ref={(el) => {
-                                if (el) canvasRefs.current.set(load.id, el)
+                                if (el) canvasContainerRefs.current.set(load.id, el)
                               }}
-                              className={cn(
-                                "border border-gray-300 shadow-lg bg-white rounded",
-                                !pdfLoaded.get(load.id) || pdfErrors.get(load.id) ? "hidden" : "",
-                              )}
-                              style={{ maxWidth: "100%", height: "auto" }}
-                            />
+                              className="w-full flex justify-center"
+                            >
+                              {/* Canvas will be created and appended here dynamically */}
+                            </div>
                           </div>
                         </div>
-                        {pdfLoaded.get(load.id) && !pdfErrors.get(load.id) && (
+                        {pdfLoaded.get(load.id) && !hasError && (
                           <div className="flex items-center justify-between p-3 bg-gray-50 border-t">
                             <div className="flex items-center gap-2">
                               <Button
@@ -863,16 +990,327 @@ export function LoadsDataTable({
                 </TabsContent>
               )}
               <TabsContent value="load-details" className="p-6">
-                {" "}
-                {/* Content for Load Details */}{" "}
+                <div className="space-y-6">
+                  {/* Load Overview */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-lg flex items-center">
+                          <Package className="mr-2 h-5 w-5" />
+                          Load Information
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Load Number</label>
+                          <p className="font-medium">
+                            {load.load_number || `L-${load.id.substring(0, 8).toUpperCase()}`}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Reference Number</label>
+                          <p>{load.reference_number || "N/A"}</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Status</label>
+                          <div className="mt-1">
+                            <Badge
+                              variant={
+                                load.status === "completed"
+                                  ? "default"
+                                  : load.status === "cancelled"
+                                    ? "destructive"
+                                    : load.status === "in_progress"
+                                      ? "default"
+                                      : "secondary"
+                              }
+                              className="capitalize"
+                            >
+                              {load.status.replace("_", " ")}
+                            </Badge>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Rate</label>
+                          <p className="text-lg font-semibold text-green-600">{formatCurrency(load.rate)}</p>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-lg flex items-center">
+                          <Building className="mr-2 h-5 w-5" />
+                          Customer Information
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Customer/Broker</label>
+                          <p className="font-medium">{getCustomerDisplay(load.customer)}</p>
+                        </div>
+                        {typeof load.customer === "object" && load.customer && (
+                          <>
+                            {load.customer.contact_name && (
+                              <div>
+                                <label className="text-sm font-medium text-muted-foreground">Contact Person</label>
+                                <p>{load.customer.contact_name}</p>
+                              </div>
+                            )}
+                            {load.customer.phone && (
+                              <div>
+                                <label className="text-sm font-medium text-muted-foreground">Phone</label>
+                                <p>{load.customer.phone}</p>
+                              </div>
+                            )}
+                            {load.customer.email && (
+                              <div>
+                                <label className="text-sm font-medium text-muted-foreground">Email</label>
+                                <p className="text-blue-600">{load.customer.email}</p>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-lg flex items-center">
+                          <Truck className="mr-2 h-5 w-5" />
+                          Driver Assignment
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        {load.load_drivers && load.load_drivers.length > 0 ? (
+                          load.load_drivers.map((assignment: any, index: number) => (
+                            <div key={index} className="border rounded-lg p-3">
+                              <div className="flex items-center space-x-3">
+                                <Avatar className="h-10 w-10">
+                                  <AvatarFallback>{assignment.driver?.name?.charAt(0) || "D"}</AvatarFallback>
+                                </Avatar>
+                                <div className="flex-1">
+                                  <p className="font-medium">{assignment.driver?.name || "Unknown Driver"}</p>
+                                  <p className="text-sm text-muted-foreground">
+                                    {assignment.driver?.phone || "No phone provided"}
+                                  </p>
+                                  <Badge variant="outline" size="sm" className="mt-1">
+                                    {assignment.is_primary ? "Primary" : "Secondary"}
+                                  </Badge>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-center py-4 text-muted-foreground">
+                            <User className="mx-auto h-8 w-8 mb-2 opacity-50" />
+                            <p>No driver assigned</p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="mt-2"
+                              onClick={() => onOpen("assignDriver", { data: load })}
+                            >
+                              Assign Driver
+                            </Button>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Pickup and Delivery Details */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-lg flex items-center">
+                          <MapPin className="mr-2 h-5 w-5 text-green-600" />
+                          Pickup Details
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Date</label>
+                            <p className="font-medium">{formatDate(load.pickup_date)}</p>
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Time</label>
+                            <p>{load.pickup_time || "Not specified"}</p>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Location</label>
+                          <p className="font-medium">{load.pickup_location || "Pickup Location"}</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Address</label>
+                          <p>{load.pickup_address || `${load.pickup_city || "N/A"}, ${load.pickup_state || "N/A"}`}</p>
+                          {load.pickup_zip && <p className="text-sm text-muted-foreground">ZIP: {load.pickup_zip}</p>}
+                        </div>
+                        {(load.pickup_contact_name || load.pickup_contact_phone) && (
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Contact Information</label>
+                            {load.pickup_contact_name && <p>{load.pickup_contact_name}</p>}
+                            {load.pickup_contact_phone && <p className="text-sm">{load.pickup_contact_phone}</p>}
+                          </div>
+                        )}
+                        {load.pickup_number && (
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Pickup Number</label>
+                            <p className="font-mono text-sm bg-muted px-2 py-1 rounded">{load.pickup_number}</p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-lg flex items-center">
+                          <MapPin className="mr-2 h-5 w-5 text-red-600" />
+                          Delivery Details
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Date</label>
+                            <p className="font-medium">{formatDate(load.delivery_date)}</p>
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Time</label>
+                            <p>{load.delivery_time || "Not specified"}</p>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Location</label>
+                          <p className="font-medium">{load.delivery_location || "Delivery Location"}</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Address</label>
+                          <p>
+                            {load.delivery_address || `${load.delivery_city || "N/A"}, ${load.delivery_state || "N/A"}`}
+                          </p>
+                          {load.delivery_zip && (
+                            <p className="text-sm text-muted-foreground">ZIP: {load.delivery_zip}</p>
+                          )}
+                        </div>
+                        {(load.delivery_contact_name || load.delivery_contact_phone) && (
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Contact Information</label>
+                            {load.delivery_contact_name && <p>{load.delivery_contact_name}</p>}
+                            {load.delivery_contact_phone && <p className="text-sm">{load.delivery_contact_phone}</p>}
+                          </div>
+                        )}
+                        {load.delivery_number && (
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Delivery Number</label>
+                            <p className="font-mono text-sm bg-muted px-2 py-1 rounded">{load.delivery_number}</p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Cargo and Equipment Details */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-lg flex items-center">
+                          <Package className="mr-2 h-5 w-5" />
+                          Cargo Information
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Commodity</label>
+                            <p className="font-medium">{load.commodity || "General Freight"}</p>
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Equipment Type</label>
+                            <p>{load.equipment_type || "N/A"}</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-4">
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Weight</label>
+                            <p>{load.weight ? `${load.weight.toLocaleString()} lbs` : "N/A"}</p>
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Pieces</label>
+                            <p>{load.pieces || "N/A"}</p>
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Miles</label>
+                            <p>{load.miles ? `${load.miles.toLocaleString()} mi` : "N/A"}</p>
+                          </div>
+                        </div>
+                        {load.special_instructions && (
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Special Instructions</label>
+                            <div className="mt-1 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                              <p className="text-sm whitespace-pre-wrap">{load.special_instructions}</p>
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-lg flex items-center">
+                          <FileText className="mr-2 h-5 w-5" />
+                          Additional Information
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Created</label>
+                            <p className="text-sm">
+                              {load.created_at ? new Date(load.created_at).toLocaleString() : "N/A"}
+                            </p>
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Last Updated</label>
+                            <p className="text-sm">
+                              {load.updated_at ? new Date(load.updated_at).toLocaleString() : "N/A"}
+                            </p>
+                          </div>
+                        </div>
+                        {load.appointment_number && (
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Appointment Number</label>
+                            <p className="font-mono text-sm bg-muted px-2 py-1 rounded">{load.appointment_number}</p>
+                          </div>
+                        )}
+                        {load.notes && (
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Notes</label>
+                            <div className="mt-1 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                              <p className="text-sm whitespace-pre-wrap">{load.notes}</p>
+                            </div>
+                          </div>
+                        )}
+                        {load.comments && (
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Manager Comments</label>
+                            <div className="mt-1 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                              <p className="text-sm whitespace-pre-wrap">{load.comments}</p>
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
               </TabsContent>
               <TabsContent value="communication" className="p-6">
-                {" "}
-                {/* Content for Communication */}{" "}
+                <div className="text-center text-muted-foreground">Communication content coming soon...</div>
               </TabsContent>
               <TabsContent value="timeline" className="p-6">
-                {" "}
-                {/* Content for Timeline */}{" "}
+                <div className="text-center text-muted-foreground">Timeline content coming soon...</div>
               </TabsContent>
             </Tabs>
           </div>

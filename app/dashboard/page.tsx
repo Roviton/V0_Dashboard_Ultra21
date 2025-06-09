@@ -2,54 +2,45 @@
 
 import { DashboardStats } from "@/components/dashboard/dashboard-stats"
 import { LoadsDataTable } from "@/components/dashboard/loads-data-table"
-import { EnhancedNewLoadModal } from "@/components/dashboard/modals/enhanced-new-load-modal"
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import useLoads from "@/hooks/use-loads"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/contexts/auth-context"
-import { useRouter, usePathname } from "next/navigation" // Import usePathname
+import { useRouter, usePathname } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import { useEffect } from "react"
 import { ModalProvider } from "@/components/modal-provider"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { useModal } from "@/hooks/use-modal"
-import type { DateRange } from "react-day-picker"
+import { useModal } from "@/hooks/use-modal-store" // Use the correct modal hook
 import { Plus } from "lucide-react"
 
 export default function DashboardPage() {
-  const [isNewLoadModalOpen, setIsNewLoadModalOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<"active" | "history" | "all">("active")
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined)
 
   const {
     loads,
     loading,
     error,
-    createLoad,
-    updateLoadStatus,
-    assignDriver,
     refetch: refetchLoads,
   } = useLoads({
     viewMode: statusFilter,
   })
 
-  const { user, loading: authLoading } = useAuth() // Destructure loading as authLoading
+  const { user, loading: authLoading } = useAuth()
   const router = useRouter()
-  const pathname = usePathname() // Get current pathname
+  const pathname = usePathname()
   const { toast } = useToast()
-  const { onOpen } = useModal()
+  const { onOpen } = useModal() // Use the working modal store
 
   useEffect(() => {
     // Redirect admin users to the admin dashboard
     if (!authLoading) {
-      // Ensure auth state is resolved
       if (user?.role === "admin") {
         if (pathname !== "/dashboard/admin") {
-          // Check if not already on the target page
           router.push("/dashboard/admin")
         }
       }
@@ -57,18 +48,32 @@ export default function DashboardPage() {
   }, [user, authLoading, router, pathname])
 
   const handleCreateNewLoad = () => {
-    onOpen("enhancedNewLoad", {
-      onSubmit: async (formData: any) => {
-        try {
-          await createLoad(formData)
-          if (refetchLoads) refetchLoads()
-          toast({ title: "Load Created", description: "New load has been successfully created." })
-        } catch (err) {
-          console.error("Failed to create load from modal:", err)
-          toast({ title: "Error", description: "Failed to create load.", variant: "destructive" })
-        }
-      },
-    })
+    console.log("🔍 Dashboard: Create button clicked")
+    console.log("🔍 Dashboard: User:", user)
+    console.log("🔍 Dashboard: User companyId:", user?.companyId)
+
+    if (!user) {
+      console.log("❌ Dashboard: No user found")
+      toast({
+        title: "Authentication Error",
+        description: "User not authenticated. Please log in again.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!user.companyId) {
+      console.log("❌ Dashboard: No companyId found")
+      toast({
+        title: "Authentication Error",
+        description: "User company information is missing. Cannot create load.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    console.log("✅ Dashboard: All checks passed, opening modal")
+    onOpen("enhancedNewLoad", {})
   }
 
   const filteredLoads = loads.filter((load) => {
@@ -166,28 +171,13 @@ export default function DashboardPage() {
                 loads={filteredLoads}
                 loading={loading && loads.length === 0}
                 error={error}
-                onUpdateStatus={updateLoadStatus}
+                onUpdateStatus={() => {}}
               />
             )}
           </CardContent>
         </Card>
       </div>
 
-      <EnhancedNewLoadModal
-        isOpen={isNewLoadModalOpen}
-        onClose={() => setIsNewLoadModalOpen(false)}
-        onSubmit={async (formData: any) => {
-          try {
-            await createLoad(formData)
-            setIsNewLoadModalOpen(false)
-            if (refetchLoads) refetchLoads()
-            toast({ title: "Load Created", description: "New load has been successfully created." })
-          } catch (err) {
-            console.error("Failed to create load:", err)
-            toast({ title: "Error", description: "Failed to create load.", variant: "destructive" })
-          }
-        }}
-      />
       <ModalProvider />
     </div>
   )

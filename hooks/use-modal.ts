@@ -1,6 +1,13 @@
 import { create } from "zustand"
 
-export type ModalType = "editLoad" | "deleteLoad" | "assignDriver" | "loadDetails" | "newLoad" | "enhancedLoadDetails"
+export type ModalType =
+  | "editLoad"
+  | "deleteLoad"
+  | "assignDriver"
+  | "loadDetails"
+  | "newLoad"
+  | "enhancedLoadDetails"
+  | "enhancedNewLoad"
 
 interface ModalData {
   load?: any

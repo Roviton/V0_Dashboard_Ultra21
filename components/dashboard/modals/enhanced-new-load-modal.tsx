@@ -1,32 +1,39 @@
 "use client"
 
 import type React from "react"
-
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect } from "react"
+import { useModal } from "@/hooks/use-modal-store"
+import { useAuth } from "@/contexts/auth-context"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
-import { Upload, Loader2, CheckCircle2, AlertCircle, Wand2, X, FileText, ZoomIn, ZoomOut } from "lucide-react"
+import { supabase } from "@/lib/supabase-client"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  FileUp,
+  ArrowRight,
+  Loader2,
+  X,
+  FileText,
+  ChevronLeft,
+  ChevronRight,
+  ZoomIn,
+  ZoomOut,
+  Check,
+  BarChart,
+  Download,
+  Upload,
+  Search,
+  Brain,
+  FileDigit,
+  CheckCircle2,
+} from "lucide-react"
+import type { BillOfLadingData } from "@/lib/ai-service"
 import { cn } from "@/lib/utils"
-
-interface EnhancedNewLoadModalProps {
-  isOpen: boolean
-  onClose: () => void
-  onSubmit: (loadData: any) => void
-}
+import { Progress } from "@/components/ui/progress"
 
 // Declare PDF.js types
 declare global {
@@ -35,86 +42,69 @@ declare global {
   }
 }
 
-export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewLoadModalProps) {
-  const [activeTab, setActiveTab] = useState("manual")
-  const [processingStatus, setProcessingStatus] = useState<"idle" | "uploading" | "processing" | "success" | "error">(
-    "idle",
-  )
-  const [statusMessage, setStatusMessage] = useState("")
-  const [isDragging, setIsDragging] = useState(false)
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [imageUrl, setImageUrl] = useState("")
-  const [extractedData, setExtractedData] = useState<any>(null)
-  const [missingFields, setMissingFields] = useState<string[]>([])
-  const [documentPreview, setDocumentPreview] = useState<string | null>(null)
-  const [pdfDataUrl, setPdfDataUrl] = useState<string | null>(null)
-  const [pdfScale, setPdfScale] = useState(1.0)
-  const [pdfLoaded, setPdfLoaded] = useState(false)
-  const [pdfRenderPending, setPdfRenderPending] = useState(false)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const pdfDocRef = useRef<any>(null)
-  const pendingPdfDataRef = useRef<string | null>(null)
-  const [blobUrl, setBlobUrl] = useState<string | null>(null) // Store Vercel Blob URL
-  const [formData, setFormData] = useState({
-    // Basic Load Information
-    reference: "",
-    loadNumber: "",
-    appointmentNumber: "",
-    customer: "",
-    brokerEmail: "",
-    brokerPhone: "",
+// Define extraction process steps
+type ExtractionStep = {
+  id: string
+  label: string
+  status: "pending" | "processing" | "completed" | "error"
+  icon: React.ReactNode
+}
 
-    // Origin Information
-    originAddress: "",
-    originCity: "",
-    originState: "",
-    originZip: "",
-    pickupDate: "",
-    pickupTime: "",
-    pickupContactName: "",
-    pickupContactPhone: "",
-    pickupContactEmail: "",
-    pickupOperatingHours: "",
-
-    // Destination Information
-    destinationAddress: "",
-    destinationCity: "",
-    destinationState: "",
-    destinationZip: "",
-    deliveryDate: "",
-    deliveryTime: "",
-    deliveryContactName: "",
-    deliveryContactPhone: "",
-    deliveryContactEmail: "",
-    deliveryOperatingHours: "",
-
-    // Load Details
-    commodity: "",
-    weight: "",
-    pieces: "",
-    dimensions: "",
-    equipment: "",
-    rate: "",
-    mileage: "",
-
-    // Driver Information
-    driverName: "",
-    driverPhone: "",
-    driverEmail: "",
-
-    // Additional Information
-    specialInstructions: "",
-    notes: "",
-    detentionPolicy: "",
-    accessorialCharges: "",
-    hazmat: false,
-    temperature: "",
-    vin: "",
-  })
-  const fileInputRef = useRef<HTMLInputElement>(null)
+export const EnhancedNewLoadModal = () => {
+  const { isOpen, type, data, onClose } = useModal()
+  const { user } = useAuth()
   const { toast } = useToast()
+  const [isLoading, setIsLoading] = useState(false)
+  const [activeTab, setActiveTab] = useState("upload")
+  const [extractedData, setExtractedData] = useState<BillOfLadingData | null>(null)
+  const [documentUrl, setDocumentUrl] = useState("")
+  const [documentName, setDocumentName] = useState("")
+  const [isExtracting, setIsExtracting] = useState(false)
+  const [imageUrl, setImageUrl] = useState("")
+  const [showPreview, setShowPreview] = useState(false)
+  const [zoomLevel, setZoomLevel] = useState(90)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
+  const [uploadSuccess, setUploadSuccess] = useState(false)
+  const [extractionSuccess, setExtractionSuccess] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const pdfDocRef = useRef<any>(null)
+
+  // Extraction process tracking
+  const [extractionSteps, setExtractionSteps] = useState<ExtractionStep[]>([
+    { id: "upload", label: "Uploading document", status: "pending", icon: <Upload className="h-4 w-4" /> },
+    { id: "ocr", label: "OCR processing", status: "pending", icon: <Search className="h-4 w-4" /> },
+    { id: "ai", label: "AI extraction", status: "pending", icon: <Brain className="h-4 w-4" /> },
+    { id: "form", label: "Preparing form data", status: "pending", icon: <FileDigit className="h-4 w-4" /> },
+  ])
+  const [currentExtractionStep, setCurrentExtractionStep] = useState<string | null>(null)
+  const [extractionProgress, setExtractionProgress] = useState(0)
+
+  const isModalOpen = isOpen && type === "enhancedNewLoad"
+
+  // Update extraction step status
+  const updateExtractionStep = (stepId: string, status: "pending" | "processing" | "completed" | "error") => {
+    setExtractionSteps((prev) => {
+      const updated = prev.map((step) => (step.id === stepId ? { ...step, status } : step))
+
+      // Calculate progress based on updated steps
+      const totalSteps = updated.length
+      const completedSteps = updated.filter((s) => s.status === "completed").length
+      const processingSteps = updated.filter((s) => s.status === "processing").length
+
+      // Each completed step = 1 point, each processing step = 0.5 points
+      const progressPoints = completedSteps + processingSteps * 0.5
+      const progressPercentage = Math.min(Math.round((progressPoints / totalSteps) * 100), 100)
+
+      setExtractionProgress(progressPercentage)
+      return updated
+    })
+
+    if (status === "processing") {
+      setCurrentExtractionStep(stepId)
+    }
+  }
 
   // Load PDF.js when component mounts
   useEffect(() => {
@@ -127,7 +117,6 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
             if (window.pdfjsLib) {
               window.pdfjsLib.GlobalWorkerOptions.workerSrc =
                 "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"
-              console.log("PDF.js loaded successfully")
             }
           }
           script.onerror = () => {
@@ -139,616 +128,53 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
         }
       }
     }
-
     loadPDFJS()
   }, [])
 
-  // Effect to handle pending PDF rendering when canvas becomes available
   useEffect(() => {
-    if (canvasRef.current && pdfRenderPending && pendingPdfDataRef.current) {
-      console.log("Canvas is now available, rendering pending PDF...")
-      displayPDFPreview(pendingPdfDataRef.current)
-      setPdfRenderPending(false)
-      pendingPdfDataRef.current = null
-    }
-  }, [documentPreview, pdfRenderPending])
+    if (extractedData) {
+      // Mark all steps as completed when extraction is done
+      setExtractionSteps((prev) => prev.map((step) => ({ ...step, status: "completed" })))
+      setExtractionProgress(100)
+      setCurrentExtractionStep(null)
 
-  const uploadToBlob = async (file: File): Promise<string> => {
-    const formData = new FormData()
-    formData.append("file", file)
-
-    const response = await fetch("/api/blob/upload", {
-      method: "POST",
-      body: formData,
-    })
-
-    const result = await response.json()
-
-    if (!result.success) {
-      throw new Error(result.error || "Failed to upload file")
-    }
-
-    return result.data.url
-  }
-
-  const displayPDFPreview = useCallback(
-    async (dataUrlOrBlobUrl: string) => {
-      console.log("Starting PDF preview display...")
-
-      if (!window.pdfjsLib) {
-        console.error("PDF.js not loaded")
-        toast({
-          title: "PDF Viewer Error",
-          description: "PDF.js library not loaded. Please refresh and try again.",
-          variant: "destructive",
-        })
-        return
-      }
-
-      if (!canvasRef.current) {
-        console.log("Canvas ref not available yet, storing PDF data for later rendering...")
-        pendingPdfDataRef.current = dataUrlOrBlobUrl
-        setPdfRenderPending(true)
-        return
-      }
-
-      try {
-        console.log("Processing PDF data...")
-
-        let pdfData: Uint8Array
-
-        if (dataUrlOrBlobUrl.startsWith("data:")) {
-          // Handle data URL (base64)
-          const base64Data = dataUrlOrBlobUrl.includes(",") ? dataUrlOrBlobUrl.split(",")[1] : dataUrlOrBlobUrl
-          const binaryString = atob(base64Data)
-          const bytes = new Uint8Array(binaryString.length)
-          for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i)
-          }
-          pdfData = bytes
-        } else {
-          // Handle blob URL - fetch the data
-          const response = await fetch(dataUrlOrBlobUrl)
-          if (!response.ok) {
-            throw new Error(`Failed to fetch PDF: ${response.statusText}`)
-          }
-          const arrayBuffer = await response.arrayBuffer()
-          pdfData = new Uint8Array(arrayBuffer)
-        }
-
-        console.log("PDF bytes length:", pdfData.length)
-
-        // Load PDF document
-        console.log("Loading PDF document...")
-        const loadingTask = window.pdfjsLib.getDocument({
-          data: pdfData,
-          cMapUrl: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/",
-          cMapPacked: true,
-        })
-
-        const pdf = await loadingTask.promise
-        console.log("PDF loaded, pages:", pdf.numPages)
-        pdfDocRef.current = pdf
-        setTotalPages(pdf.numPages)
-
-        // Get first page
-        console.log("Getting first page...")
-        const page = await pdf.getPage(1)
-        console.log("Page loaded")
-
-        // Set up canvas
-        const canvas = canvasRef.current
-        const context = canvas.getContext("2d")
-
-        if (!context) {
-          throw new Error("Could not get canvas context")
-        }
-
-        // Calculate scale to fit container with better quality
-        const viewport = page.getViewport({ scale: 1.0 })
-        const containerWidth = 550
-        const scale = Math.min(containerWidth / viewport.width, pdfScale)
-        const scaledViewport = page.getViewport({ scale })
-
-        // Set device pixel ratio for better quality
-        const devicePixelRatio = window.devicePixelRatio || 1
-        canvas.height = scaledViewport.height * devicePixelRatio
-        canvas.width = scaledViewport.width * devicePixelRatio
-        canvas.style.width = scaledViewport.width + "px"
-        canvas.style.height = scaledViewport.height + "px"
-
-        // Scale the context for high DPI displays
-        context.scale(devicePixelRatio, devicePixelRatio)
-
-        console.log("Viewport:", { width: scaledViewport.width, height: scaledViewport.height, scale })
-
-        // Clear canvas
-        context.clearRect(0, 0, canvas.width, canvas.height)
-
-        // Render page
-        console.log("Rendering page...")
-        const renderContext = {
-          canvasContext: context,
-          viewport: scaledViewport,
-        }
-
-        await page.render(renderContext).promise
-        console.log("PDF rendered successfully")
-        setPdfLoaded(true)
-        setPdfScale(scale)
-      } catch (error) {
-        console.error("Error rendering PDF:", error)
-        setPdfLoaded(false)
-
-        // Show fallback message
-        if (canvasRef.current) {
-          const canvas = canvasRef.current
-          const context = canvas.getContext("2d")
-          if (context) {
-            canvas.width = 300
-            canvas.height = 200
-            context.fillStyle = "#f3f4f6"
-            context.fillRect(0, 0, canvas.width, canvas.height)
-            context.fillStyle = "#6b7280"
-            context.font = "14px Arial"
-            context.textAlign = "center"
-            context.fillText("PDF Preview Unavailable", canvas.width / 2, canvas.height / 2 - 10)
-            context.fillText("Data extraction completed", canvas.width / 2, canvas.height / 2 + 10)
-          }
-        }
-
-        toast({
-          title: "PDF Rendering Error",
-          description: "Could not display PDF preview, but data extraction was successful.",
-          variant: "destructive",
-        })
-      }
-    },
-    [pdfScale, toast],
-  )
-
-  const handlePDFZoom = async (newScale: number) => {
-    if (!pdfDocRef.current || !canvasRef.current) {
-      console.error("PDF document or canvas not available for zoom")
-      return
-    }
-
-    console.log("Zooming to scale:", newScale)
-
-    try {
-      const page = await pdfDocRef.current.getPage(currentPage)
-      const canvas = canvasRef.current
-      const context = canvas.getContext("2d")
-
-      if (!context) {
-        throw new Error("Could not get canvas context")
-      }
-
-      const viewport = page.getViewport({ scale: newScale })
-
-      // Set device pixel ratio for better quality
-      const devicePixelRatio = window.devicePixelRatio || 1
-      canvas.height = viewport.height * devicePixelRatio
-      canvas.width = viewport.width * devicePixelRatio
-      canvas.style.width = viewport.width + "px"
-      canvas.style.height = viewport.height + "px"
-
-      // Scale the context for high DPI displays
-      context.scale(devicePixelRatio, devicePixelRatio)
-
-      // Clear and render
-      context.clearRect(0, 0, canvas.width, canvas.height)
-
-      const renderContext = {
-        canvasContext: context,
-        viewport: viewport,
-      }
-
-      await page.render(renderContext).promise
-      setPdfScale(newScale)
-      console.log("PDF zoom completed to:", newScale)
-    } catch (error) {
-      console.error("Error zooming PDF:", error)
-      toast({
-        title: "Zoom Error",
-        description: "Could not zoom PDF preview",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { id, value, type } = e.target
-    setFormData((prev) => ({
-      ...prev,
-      [id]: type === "checkbox" ? (e.target as HTMLInputElement).checked : value,
-    }))
-  }
-
-  const handleSelectChange = (field: string, value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-    }))
-  }
-
-  const handleFileSelect = async (file: File) => {
-    if (!file) return
-
-    if (file.type !== "application/pdf" && !file.type.startsWith("image/")) {
-      toast({
-        title: "Invalid file type",
-        description: "Please upload a PDF or image file",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setSelectedFile(file)
-    setProcessingStatus("uploading")
-    setStatusMessage("Uploading file to cloud storage...")
-
-    try {
-      // Upload to Vercel Blob
-      const uploadedBlobUrl = await uploadToBlob(file)
-      setBlobUrl(uploadedBlobUrl)
-      console.log("File uploaded to blob:", uploadedBlobUrl)
-
-      // Create preview for images and PDFs
-      if (file.type.startsWith("image/")) {
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          if (e.target?.result) {
-            setDocumentPreview(e.target.result as string)
-          }
-        }
-        reader.readAsDataURL(file)
-      } else if (file.type === "application/pdf") {
-        setDocumentPreview("PDF_DOCUMENT")
-        // Use the blob URL for PDF preview
-        setTimeout(() => {
-          displayPDFPreview(uploadedBlobUrl)
-        }, 100)
-      }
-
-      // Process document for data extraction
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        if (e.target?.result) {
-          processDocument(e.target.result as string)
-        }
-      }
-      reader.readAsDataURL(file)
-    } catch (error) {
-      console.error("Error uploading file:", error)
-      setProcessingStatus("error")
-      setStatusMessage(error instanceof Error ? error.message : "Failed to upload file")
-      toast({
-        title: "Upload Failed",
-        description: "Could not upload file to cloud storage",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const processDocument = async (dataUrl: string) => {
-    setProcessingStatus("processing")
-    setStatusMessage("Extracting load details from document...")
-    setMissingFields([])
-
-    try {
-      console.log("Sending document to API for processing...")
-
-      const response = await fetch("/api/ai/extract-document", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ dataUrl }),
-      })
-
-      const result = await response.json()
-      console.log("API response:", result)
-
-      if (result.success && result.data) {
-        setExtractedData(result.data)
-
-        // Enhanced data mapping with better time extraction
-        setFormData((prev) => ({
-          ...prev,
-          // Basic Information
-          reference: result.data.loadNumber || prev.reference,
-          loadNumber: result.data.loadNumber || prev.loadNumber,
-          appointmentNumber: result.data.appointmentNumber || prev.appointmentNumber,
-          customer: result.data.broker?.name || result.data.consignee?.name || prev.customer,
-          brokerEmail: result.data.broker?.email || prev.brokerEmail,
-          brokerPhone: result.data.broker?.phone || prev.brokerPhone,
-
-          // Origin/Pickup Information
-          originAddress: result.data.pickupLocation?.address || prev.originAddress,
-          originCity: result.data.pickupLocation?.city || prev.originCity,
-          originState: result.data.pickupLocation?.state || prev.originState,
-          originZip: result.data.pickupLocation?.zip || prev.originZip,
-          pickupDate: extractDateOnly(result.data.pickupDate) || prev.pickupDate,
-          pickupTime:
-            extractTimeOnly(result.data.pickupDate) ||
-            extractTimeFromInstructions(result.data.pickupLocation?.operatingHours, "pickup") ||
-            "",
-          pickupContactName: result.data.pickupLocation?.contactName || prev.pickupContactName,
-          pickupContactPhone: result.data.pickupLocation?.contactPhone || prev.pickupContactPhone,
-          pickupContactEmail: result.data.pickupLocation?.contactEmail || prev.pickupContactEmail,
-          pickupOperatingHours: result.data.pickupLocation?.operatingHours || prev.pickupOperatingHours,
-
-          // Destination/Delivery Information
-          destinationAddress: result.data.deliveryLocation?.address || prev.destinationAddress,
-          destinationCity: result.data.deliveryLocation?.city || prev.destinationCity,
-          destinationState: result.data.deliveryLocation?.state || prev.destinationState,
-          destinationZip: result.data.deliveryLocation?.zip || prev.destinationZip,
-          deliveryDate: extractDateOnly(result.data.deliveryDate) || prev.deliveryDate,
-          deliveryTime:
-            extractTimeOnly(result.data.deliveryDate) ||
-            extractTimeFromInstructions(result.data.deliveryLocation?.operatingHours, "delivery") ||
-            "",
-          deliveryContactName: result.data.deliveryLocation?.contactName || prev.deliveryContactName,
-          deliveryContactPhone: result.data.deliveryLocation?.contactPhone || prev.deliveryContactPhone,
-          deliveryContactEmail: result.data.deliveryLocation?.contactEmail || prev.deliveryContactEmail,
-          deliveryOperatingHours: result.data.deliveryLocation?.operatingHours || prev.deliveryOperatingHours,
-
-          // Load Details
-          commodity: result.data.commodity || prev.commodity,
-          weight: result.data.weight ? `${result.data.weight}` : prev.weight,
-          rate: result.data.rate ? `${result.data.rate}` : prev.rate,
-          vin: result.data.vin || prev.vin,
-          dimensions: result.data.dimensions || prev.dimensions,
-
-          // Driver Information
-          driverName: result.data.driver?.name || prev.driverName,
-          driverPhone: result.data.driver?.phone || prev.driverPhone,
-
-          // Additional Information
-          specialInstructions: result.data.specialInstructions || prev.specialInstructions,
-          notes: result.data.specialInstructions || prev.notes,
-          detentionPolicy: result.data.detentionPolicy || prev.detentionPolicy,
-          accessorialCharges: result.data.accessorialCharges || prev.accessorialCharges,
-        }))
-
-        // Check for missing fields
-        const missing: string[] = []
-        if (!result.data.pickupLocation?.operatingHours) missing.push("Pickup Hours")
-        if (!result.data.deliveryLocation?.operatingHours) missing.push("Delivery Hours")
-        if (!result.data.detentionPolicy) missing.push("Detention Policy")
-        if (!result.data.dimensions) missing.push("Dimensions")
-        setMissingFields(missing)
-
-        setProcessingStatus("success")
-        setStatusMessage(
-          result.note
-            ? `${result.note} - Review and edit the data below.`
-            : "Document processed successfully! Review and edit the extracted data.",
-        )
+      // Small delay to show completion before switching tabs
+      setTimeout(() => {
         setActiveTab("review")
-
-        toast({
-          title: "OCR Success",
-          description: result.note || "Load details extracted from document",
-        })
-      } else {
-        throw new Error(result.error || "Failed to extract data")
-      }
-    } catch (error) {
-      console.error("Document processing error:", error)
-      setProcessingStatus("error")
-      setStatusMessage(error instanceof Error ? error.message : "Failed to process document")
-      toast({
-        title: "OCR Failed",
-        description: "Could not extract data from document. Please enter details manually.",
-        variant: "destructive",
-      })
+        setExtractionSuccess(true)
+        setIsExtracting(false) // Only set to false when everything is complete
+      }, 1000)
     }
-  }
+  }, [extractedData])
 
-  // Enhanced time extraction functions
-  const extractDateOnly = (dateString: string | null): string => {
-    if (!dateString) return ""
-    try {
-      const date = new Date(dateString)
-      if (isNaN(date.getTime())) {
-        const dateMatch = dateString.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/)
-        if (dateMatch) {
-          const [, month, day, year] = dateMatch
-          return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`
-        }
-        return ""
-      }
-      return date.toISOString().split("T")[0]
-    } catch {
-      return ""
+  // Render PDF when document URL changes
+  useEffect(() => {
+    if (documentUrl && documentUrl.endsWith(".pdf") && showPreview) {
+      renderPDF(documentUrl)
     }
-  }
+  }, [documentUrl, showPreview, zoomLevel])
 
-  const extractTimeOnly = (dateString: string | null): string => {
-    if (!dateString) return ""
-    try {
-      const date = new Date(dateString)
-      if (!isNaN(date.getTime())) {
-        const hours = date.getHours()
-        const minutes = date.getMinutes()
-        if (hours !== 0 || minutes !== 0) {
-          return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-        }
-      }
-
-      const timePatterns = [/(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)/i, /(\d{1,2}):(\d{2})/, /(\d{1,2})\s*(AM|PM|am|pm)/i]
-
-      for (const pattern of timePatterns) {
-        const match = dateString.match(pattern)
-        if (match) {
-          let hour = Number.parseInt(match[1])
-          const minute = match[2] ? Number.parseInt(match[2]) : 0
-          const ampm = match[3]
-
-          if (ampm && ampm.toLowerCase() === "pm" && hour !== 12) {
-            hour += 12
-          } else if (ampm && ampm.toLowerCase() === "am" && hour === 12) {
-            hour = 0
-          }
-
-          return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`
-        }
-      }
-
-      return ""
-    } catch {
-      return ""
-    }
-  }
-
-  const extractTimeFromInstructions = (instructions: string | null, type: "pickup" | "delivery"): string => {
-    if (!instructions) return ""
-
-    const apptPatterns = [
-      /appt at (\d{1,2}:?\d{2}\s*[ap]m)/i,
-      /appointment at (\d{1,2}:?\d{2}\s*[ap]m)/i,
-      /(\d{1,2}:?\d{2}\s*[ap]m) appt/i,
-    ]
-
-    for (const pattern of apptPatterns) {
-      const match = instructions.match(pattern)
-      if (match && match[1]) {
-        return extractTimeOnly(match[1])
-      }
-    }
-
-    return ""
-  }
-
-  const processImageUrl = async () => {
-    if (!imageUrl.trim()) {
-      toast({
-        title: "Missing URL",
-        description: "Please enter an image URL",
-        variant: "destructive",
-      })
+  const renderPDF = async (url: string) => {
+    if (!window.pdfjsLib) {
+      console.log("PDF.js not loaded yet")
       return
     }
 
-    setDocumentPreview(imageUrl.trim())
-    await processDocument(imageUrl.trim())
-  }
-
-  const handleDragEvents = {
-    onDragEnter: (e: React.DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      setIsDragging(true)
-    },
-    onDragLeave: (e: React.DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      setIsDragging(false)
-    },
-    onDragOver: (e: React.DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-    },
-    onDrop: (e: React.DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      setIsDragging(false)
-      const files = e.dataTransfer.files
-      if (files && files.length > 0) {
-        handleFileSelect(files[0])
-      }
-    },
-  }
-
-  const handleSubmit = () => {
-    // Combine address fields for backward compatibility
-    const processedData = {
-      ...formData,
-      origin: `${formData.originAddress}, ${formData.originCity}, ${formData.originState} ${formData.originZip}`.trim(),
-      destination:
-        `${formData.destinationAddress}, ${formData.destinationCity}, ${formData.destinationState} ${formData.destinationZip}`.trim(),
-      pickupDateTime:
-        formData.pickupDate && formData.pickupTime
-          ? `${formData.pickupDate}T${formData.pickupTime}`
-          : formData.pickupDate,
-      deliveryDateTime:
-        formData.deliveryDate && formData.deliveryTime
-          ? `${formData.deliveryDate}T${formData.deliveryTime}`
-          : formData.deliveryDate,
-      blobUrl: blobUrl, // Include the Vercel Blob URL
+    if (!canvasRef.current) {
+      console.log("Canvas not ready")
+      return
     }
 
-    onSubmit(processedData)
-    resetForm()
-    onClose()
-  }
-
-  const resetForm = () => {
-    setActiveTab("manual")
-    setProcessingStatus("idle")
-    setStatusMessage("")
-    setSelectedFile(null)
-    setImageUrl("")
-    setExtractedData(null)
-    setMissingFields([])
-    setDocumentPreview(null)
-    setPdfDataUrl(null)
-    setPdfScale(1.0)
-    setPdfLoaded(false)
-    setPdfRenderPending(false)
-    pdfDocRef.current = null
-    pendingPdfDataRef.current = null
-    setCurrentPage(1)
-    setTotalPages(1)
-    setBlobUrl(null)
-
-    setFormData({
-      reference: "",
-      loadNumber: "",
-      appointmentNumber: "",
-      customer: "",
-      brokerEmail: "",
-      brokerPhone: "",
-      originAddress: "",
-      originCity: "",
-      originState: "",
-      originZip: "",
-      pickupDate: "",
-      pickupTime: "",
-      pickupContactName: "",
-      pickupContactPhone: "",
-      pickupContactEmail: "",
-      pickupOperatingHours: "",
-      destinationAddress: "",
-      destinationCity: "",
-      destinationState: "",
-      destinationZip: "",
-      deliveryDate: "",
-      deliveryTime: "",
-      deliveryContactName: "",
-      deliveryContactPhone: "",
-      deliveryContactEmail: "",
-      deliveryOperatingHours: "",
-      commodity: "",
-      weight: "",
-      pieces: "",
-      dimensions: "",
-      equipment: "",
-      rate: "",
-      mileage: "",
-      driverName: "",
-      driverPhone: "",
-      driverEmail: "",
-      specialInstructions: "",
-      notes: "",
-      detentionPolicy: "",
-      accessorialCharges: "",
-      hazmat: false,
-      temperature: "",
-      vin: "",
-    })
+    try {
+      const loadingTask = window.pdfjsLib.getDocument(url)
+      const pdf = await loadingTask.promise
+      pdfDocRef.current = pdf
+      setTotalPages(pdf.numPages)
+      renderPage(currentPage)
+    } catch (error) {
+      console.error("Error loading PDF:", error)
+      renderFallbackDocument()
+    }
   }
 
   const renderPage = async (pageNumber: number) => {
@@ -759,23 +185,17 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
       const canvas = canvasRef.current
       const context = canvas.getContext("2d")
 
-      if (!context) {
-        throw new Error("Could not get canvas context")
-      }
-
       const viewport = page.getViewport({ scale: 1.0 })
-      const containerWidth = 550
-      const scale = Math.min(containerWidth / viewport.width, pdfScale)
-      const scaledViewport = page.getViewport({ scale })
+      const containerWidth = canvas.parentElement?.clientWidth || 550
+      const fitScale = Math.min(containerWidth / viewport.width, zoomLevel / 100)
+      const scaledViewport = page.getViewport({ scale: fitScale })
 
       const devicePixelRatio = window.devicePixelRatio || 1
       canvas.height = scaledViewport.height * devicePixelRatio
       canvas.width = scaledViewport.width * devicePixelRatio
-      canvas.style.width = scaledViewport.width + "px"
-      canvas.style.height = scaledViewport.height + "px"
-
+      canvas.style.width = `${scaledViewport.width}px`
+      canvas.style.height = `${scaledViewport.height}px`
       context.scale(devicePixelRatio, devicePixelRatio)
-      context.clearRect(0, 0, canvas.width, canvas.height)
 
       const renderContext = {
         canvasContext: context,
@@ -784,712 +204,1244 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
 
       await page.render(renderContext).promise
       setCurrentPage(pageNumber)
-      setPdfLoaded(true)
-      setPdfScale(scale)
     } catch (error) {
-      console.error("Error rendering PDF:", error)
-      setPdfLoaded(false)
-
-      if (canvasRef.current) {
-        const canvas = canvasRef.current
-        const context = canvas.getContext("2d")
-        if (context) {
-          canvas.width = 300
-          canvas.height = 200
-          context.fillStyle = "#f3f4f6"
-          context.fillRect(0, 0, canvas.width, canvas.height)
-          context.fillStyle = "#6b7280"
-          context.font = "14px Arial"
-          context.textAlign = "center"
-          context.fillText("PDF Preview Unavailable", canvas.width / 2, canvas.height / 2 - 10)
-          context.fillText("Data extraction completed", canvas.width / 2, canvas.height / 2 + 10)
-        }
-      }
-
-      toast({
-        title: "PDF Rendering Error",
-        description: "Could not display PDF preview, but data extraction was successful.",
-        variant: "destructive",
-      })
+      console.error("Error rendering PDF page:", error)
+      renderFallbackDocument()
     }
   }
 
-  const renderDocumentPreview = () => {
-    if (!documentPreview) return null
+  const renderFallbackDocument = () => {
+    if (!canvasRef.current) return
 
-    return (
-      <div className="w-[600px] border-r bg-gray-50 p-4 flex flex-col">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold">Document Preview</h3>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setDocumentPreview(null)
-              setPdfDataUrl(null)
-              setPdfLoaded(false)
-              setPdfRenderPending(false)
-              pdfDocRef.current = null
-              pendingPdfDataRef.current = null
-            }}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
 
-        <div className="flex-1 flex flex-col">
-          {documentPreview === "PDF_DOCUMENT" ? (
-            <div className="w-full h-full bg-white rounded-lg border overflow-hidden flex flex-col">
-              <div className="flex items-center justify-between p-3 bg-gray-100 border-b">
-                <div className="flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-gray-600" />
-                  <span className="text-sm font-medium text-gray-700 truncate">{selectedFile?.name}</span>
-                  {blobUrl && <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Uploaded</span>}
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setDocumentPreview(null)
-                    setPdfDataUrl(null)
-                    setPdfLoaded(false)
-                    setPdfRenderPending(false)
-                    pdfDocRef.current = null
-                    pendingPdfDataRef.current = null
-                  }}
-                >
-                  <X className="h-4 w-4" />
+    const baseWidth = 612
+    const baseHeight = 792
+    const scale = zoomLevel / 100
+
+    canvas.width = baseWidth * scale
+    canvas.height = baseHeight * scale
+    canvas.style.width = `${Math.min(canvas.parentElement?.clientWidth || 550, baseWidth * scale)}px`
+    canvas.style.height = "auto"
+
+    ctx.scale(scale, scale)
+    ctx.fillStyle = "#ffffff"
+    ctx.fillRect(0, 0, baseWidth, baseHeight)
+
+    ctx.fillStyle = "#1f2937"
+    ctx.font = "bold 28px Arial"
+    ctx.textAlign = "center"
+    ctx.fillText("RATE CONFIRMATION", baseWidth / 2, 50)
+    ctx.font = "18px Arial"
+    ctx.fillText("TFI Transportation Services", baseWidth / 2, 85)
+    ctx.font = "14px Arial"
+    ctx.fillStyle = "#6b7280"
+    ctx.fillText("123 Logistics Way, Transport City, TX 75001", baseWidth / 2, 105)
+    ctx.fillText("Phone: (555) 123-4567 | Email: dispatch@tfi.com", baseWidth / 2, 125)
+
+    ctx.textAlign = "left"
+    ctx.strokeStyle = "#e5e7eb"
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(50, 150)
+    ctx.lineTo(562, 150)
+    ctx.stroke()
+
+    ctx.fillStyle = "#1f2937"
+    ctx.font = "bold 18px Arial"
+    ctx.fillText("LOAD INFORMATION", 50, 180)
+    ctx.font = "14px Arial"
+    ctx.fillStyle = "#374151"
+    const loadInfo = [
+      `Load Number: ${extractedData?.loadNumber || "N/A"}`,
+      `Reference: ${extractedData?.loadNumber || "N/A"}`,
+      `Customer: ${extractedData?.broker?.name || "N/A"}`,
+      `Rate: $${extractedData?.rate || "0.00"}`,
+      `Commodity: ${extractedData?.commodity || "General Freight"}`,
+      `Weight: ${extractedData?.weight ? extractedData.weight + " lbs" : "N/A"}`,
+    ]
+    loadInfo.forEach((info, index) => ctx.fillText(info, 50, 210 + index * 25))
+
+    ctx.fillStyle = "#1f2937"
+    ctx.font = "bold 18px Arial"
+    ctx.fillText("PICKUP INFORMATION", 50, 380)
+    ctx.font = "14px Arial"
+    ctx.fillStyle = "#374151"
+    const pickupInfo = [
+      `Location: ${extractedData?.pickupLocation?.city || "N/A"}, ${extractedData?.pickupLocation?.state || "N/A"}`,
+      `Address: ${extractedData?.pickupLocation?.address || "N/A"}`,
+      `Date: ${extractedData?.pickupDate ? new Date(extractedData.pickupDate).toLocaleDateString() : "N/A"}`,
+      `Time: ${extractedData?.pickupDate?.split("T")[1]?.substring(0, 5) || "N/A"}`,
+      `Contact: ${extractedData?.pickupLocation?.contactName || "N/A"}`,
+      `Phone: ${extractedData?.pickupLocation?.contactPhone || "(555) 123-4567"}`,
+    ]
+    pickupInfo.forEach((info, index) => ctx.fillText(info, 50, 410 + index * 25))
+
+    ctx.fillStyle = "#1f2937"
+    ctx.font = "bold 18px Arial"
+    ctx.fillText("DELIVERY INFORMATION", 50, 570)
+    ctx.font = "14px Arial"
+    ctx.fillStyle = "#374151"
+    const deliveryInfo = [
+      `Location: ${extractedData?.deliveryLocation?.city || "N/A"}, ${extractedData?.deliveryLocation?.state || "N/A"}`,
+      `Address: ${extractedData?.deliveryLocation?.address || "N/A"}`,
+      `Date: ${extractedData?.deliveryDate ? new Date(extractedData.deliveryDate).toLocaleDateString() : "N/A"}`,
+      `Time: ${extractedData?.deliveryDate?.split("T")[1]?.substring(0, 5) || "N/A"}`,
+      `Contact: ${extractedData?.deliveryLocation?.contactName || "N/A"}`,
+      `Phone: ${extractedData?.deliveryLocation?.contactPhone || "(555) 987-6543"}`,
+    ]
+    deliveryInfo.forEach((info, index) => ctx.fillText(info, 50, 600 + index * 25))
+
+    ctx.fillStyle = "#059669"
+    ctx.font = "bold 20px Arial"
+    ctx.textAlign = "center"
+    ctx.fillText(`TOTAL RATE: $${extractedData?.rate || "0.00"}`, baseWidth / 2, 730)
+    ctx.font = "12px Arial"
+    ctx.fillStyle = "#6b7280"
+    ctx.fillText("This rate confirmation is valid for 24 hours.", baseWidth / 2, 755)
+    ctx.fillText(`Generated on: ${new Date().toLocaleString()}`, baseWidth / 2, 775)
+
+    ctx.strokeStyle = "#d1d5db"
+    ctx.lineWidth = 1
+    ctx.strokeRect(25, 25, baseWidth - 50, baseHeight - 50)
+  }
+
+  const handleFileUpload = async (file: File) => {
+    if (!file) return
+
+    setIsExtracting(true)
+    setDocumentName(file.name)
+
+    // Reset extraction steps
+    setExtractionSteps((prev) => prev.map((step) => ({ ...step, status: "pending" })))
+    setExtractionProgress(0)
+
+    try {
+      // Step 1: Upload to Vercel Blob
+      updateExtractionStep("upload", "processing")
+
+      const formData = new FormData()
+      formData.append("file", file)
+
+      const uploadResponse = await fetch("/api/blob/upload", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!uploadResponse.ok) {
+        updateExtractionStep("upload", "error")
+        throw new Error("Failed to upload document")
+      }
+
+      const uploadResult = await uploadResponse.json()
+      if (!uploadResult.success) {
+        updateExtractionStep("upload", "error")
+        throw new Error(uploadResult.error || "Failed to upload document")
+      }
+
+      setDocumentUrl(uploadResult.data.url)
+      setUploadSuccess(true)
+      setShowPreview(true)
+      updateExtractionStep("upload", "completed")
+
+      // Step 2: OCR Processing
+      updateExtractionStep("ocr", "processing")
+      console.log("OCR API route called")
+
+      // Step 3: AI Extraction
+      const fileType = file.type
+      const reader = new FileReader()
+
+      reader.onload = async (e) => {
+        const dataUrl = e.target?.result as string
+
+        try {
+          updateExtractionStep("ocr", "completed")
+          console.log("Processing document with AI service...")
+          updateExtractionStep("ai", "processing")
+
+          const extractResponse = await fetch("/api/ai/extract-document", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ dataUrl }),
+          })
+
+          if (!extractResponse.ok) {
+            updateExtractionStep("ai", "error")
+            throw new Error("Failed to extract data from document")
+          }
+
+          console.log("AI extraction completed")
+          updateExtractionStep("ai", "completed")
+
+          // Step 4: Prepare form data
+          updateExtractionStep("form", "processing")
+          console.log("Preparing form data")
+
+          const extractResult = await extractResponse.json()
+          if (!extractResult.success) {
+            updateExtractionStep("form", "error")
+            throw new Error(extractResult.error || "Failed to extract data from document")
+          }
+
+          // This will trigger the useEffect that handles completion
+          setExtractedData(extractResult.data)
+
+          toast({
+            title: "Data Extracted",
+            description: "Document processed successfully. Please review the extracted information.",
+          })
+        } catch (error: any) {
+          console.error("Error in extraction process:", error)
+          setIsExtracting(false)
+          toast({
+            title: "Extraction Error",
+            description: error.message || "Failed to process document",
+            variant: "destructive",
+          })
+        }
+      }
+
+      reader.readAsDataURL(file)
+    } catch (error: any) {
+      console.error("Error processing document:", error)
+      toast({
+        title: "Error",
+        description: error.message || "Failed to process document",
+        variant: "destructive",
+      })
+      setIsExtracting(false) // Set to false immediately on error
+    } finally {
+      // Remove the timeout logic - let the extraction complete naturally
+    }
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFileUpload(e.dataTransfer.files[0])
+    }
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+  }
+
+  const handleUrlSubmit = async () => {
+    if (!imageUrl) return
+
+    setIsExtracting(true)
+    // Reset extraction steps
+    setExtractionSteps((prev) => prev.map((step) => ({ ...step, status: "pending" })))
+    setExtractionProgress(0)
+
+    try {
+      // Mark upload as completed immediately since we're using a URL
+      updateExtractionStep("upload", "completed")
+
+      // Start OCR and AI extraction
+      updateExtractionStep("ocr", "processing")
+      console.log("OCR API route called for URL")
+
+      updateExtractionStep("ai", "processing")
+      console.log("Processing URL with AI service...")
+
+      const response = await fetch("/api/ai/extract-document", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ dataUrl: imageUrl }),
+      })
+
+      if (!response.ok) {
+        updateExtractionStep("ai", "error")
+        throw new Error("Failed to extract data from URL")
+      }
+
+      updateExtractionStep("ai", "completed")
+      updateExtractionStep("form", "processing")
+      console.log("Preparing form data from URL")
+
+      const result = await response.json()
+      if (!result.success) {
+        updateExtractionStep("form", "error")
+        throw new Error(result.error || "Failed to extract data from URL")
+      }
+
+      setExtractedData(result.data)
+      setDocumentUrl(imageUrl)
+      setDocumentName("Document from URL")
+      setUploadSuccess(true)
+      setExtractionSuccess(true)
+      setShowPreview(true)
+      updateExtractionStep("form", "completed")
+
+      setActiveTab("review")
+      toast({
+        title: "Data Extracted",
+        description: "Document processed successfully. Please review the extracted information.",
+      })
+    } catch (error: any) {
+      console.error("Error processing URL:", error)
+      toast({
+        title: "Error",
+        description: error.message || "Failed to process URL",
+        variant: "destructive",
+      })
+    } finally {
+      setIsExtracting(false)
+    }
+  }
+
+  const generateUniqueLoadNumber = async (companyId: string, baseLoadNumber?: string): Promise<string> => {
+    let loadNumber = baseLoadNumber
+    let attempt = 0
+    const maxAttempts = 10
+
+    while (attempt < maxAttempts) {
+      if (!loadNumber || attempt > 0) {
+        const timestamp = Date.now().toString()
+        const random = Math.floor(Math.random() * 10000)
+          .toString()
+          .padStart(4, "0")
+        const suffix = attempt > 0 ? `-${attempt}` : ""
+        loadNumber = `LOAD-${timestamp.slice(-8)}${random}${suffix}`
+      }
+
+      // Check if this load number already exists for this company
+      const { data: existingLoad, error: checkError } = await supabase
+        .from("loads")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("load_number", loadNumber)
+        .maybeSingle()
+
+      if (checkError) {
+        console.error("Error checking load number uniqueness:", checkError)
+        throw new Error(`Failed to verify load number uniqueness: ${checkError.message}`)
+      }
+
+      if (!existingLoad) {
+        return loadNumber // This load number is unique
+      }
+
+      attempt++
+      loadNumber = "" // Reset for next attempt
+    }
+
+    throw new Error("Unable to generate a unique load number after multiple attempts")
+  }
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setIsLoading(true)
+
+    try {
+      if (!user?.companyId) {
+        throw new Error("User company information is missing. Cannot create load.")
+      }
+
+      const formData = new FormData(e.currentTarget)
+
+      // Get form values
+      const customerName = (formData.get("customer_name") as string) || extractedData?.broker?.name || ""
+      const pickupAddress = (formData.get("pickup_address") as string) || extractedData?.pickupLocation?.address || ""
+      const pickupCity = (formData.get("pickup_city") as string) || extractedData?.pickupLocation?.city || ""
+      const pickupState = (formData.get("pickup_state") as string) || extractedData?.pickupLocation?.state || ""
+      const pickupZip = (formData.get("pickup_zip") as string) || extractedData?.pickupLocation?.zip || ""
+      const pickupDate = (formData.get("pickup_date") as string) || extractedData?.pickupDate?.split("T")[0] || ""
+      const pickupTime =
+        (formData.get("pickup_time") as string) || extractedData?.pickupDate?.split("T")[1]?.substring(0, 5) || ""
+      const deliveryAddress =
+        (formData.get("delivery_address") as string) || extractedData?.deliveryLocation?.address || ""
+      const deliveryCity = (formData.get("delivery_city") as string) || extractedData?.deliveryLocation?.city || ""
+      const deliveryState = (formData.get("delivery_state") as string) || extractedData?.deliveryLocation?.state || ""
+      const deliveryZip = (formData.get("delivery_zip") as string) || extractedData?.deliveryLocation?.zip || ""
+      const deliveryDate = (formData.get("delivery_date") as string) || extractedData?.deliveryDate?.split("T")[0] || ""
+      const deliveryTime =
+        (formData.get("delivery_time") as string) || extractedData?.deliveryDate?.split("T")[1]?.substring(0, 5) || ""
+      const rate = formData.get("rate")
+        ? Number.parseFloat(formData.get("rate") as string)
+        : extractedData?.rate || null
+      const distance = formData.get("distance") ? Number.parseFloat(formData.get("distance") as string) : null
+      const weight = formData.get("weight")
+        ? Number.parseFloat(formData.get("weight") as string)
+        : extractedData?.weight || null
+      const commodity = (formData.get("commodity") as string) || extractedData?.commodity || ""
+      const specialInstructions =
+        (formData.get("special_instructions") as string) || extractedData?.specialInstructions || ""
+      const vinNumber = (formData.get("vin_number") as string) || extractedData?.vin || ""
+      const equipmentType = (formData.get("equipment_type") as string) || ""
+
+      // Generate a unique load number if not provided
+      let loadNumber = (formData.get("load_number") as string) || extractedData?.loadNumber || ""
+
+      if (!loadNumber) {
+        // Generate a more unique load number using timestamp + random
+        const timestamp = Date.now().toString()
+        const random = Math.floor(Math.random() * 1000)
+          .toString()
+          .padStart(3, "0")
+        loadNumber = `LOAD-${timestamp.slice(-8)}${random}`
+      }
+
+      const referenceNumber = (formData.get("reference_number") as string) || extractedData?.loadNumber || ""
+      const appointmentNumber = (formData.get("appointment_number") as string) || extractedData?.appointmentNumber || ""
+      const brokerEmail = (formData.get("broker_email") as string) || extractedData?.broker?.email || ""
+      const pickupHours =
+        (formData.get("pickup_hours") as string) || extractedData?.pickupLocation?.operatingHours || ""
+      const pickupContactName =
+        (formData.get("pickup_contact_name") as string) || extractedData?.pickupLocation?.contactName || ""
+      const pickupContactPhone =
+        (formData.get("pickup_contact_phone") as string) || extractedData?.pickupLocation?.contactPhone || ""
+
+      // Validate required fields
+      if (!pickupDate) {
+        throw new Error("Pickup date is required")
+      }
+      if (!deliveryDate) {
+        throw new Error("Delivery date is required")
+      }
+
+      // Find or create customer
+      let customerId: string
+      const { data: existingCustomer, error: customerError } = await supabase
+        .from("customers")
+        .select("id")
+        .eq("name", customerName)
+        .eq("company_id", user.companyId)
+        .maybeSingle()
+
+      if (customerError) {
+        throw new Error(`Error checking for existing customer: ${customerError.message}`)
+      }
+
+      if (existingCustomer) {
+        customerId = existingCustomer.id
+        console.log("✅ Found existing customer:", customerId)
+      } else {
+        // Create new customer
+        const { data: newCustomer, error: createError } = await supabase
+          .from("customers")
+          .insert({
+            name: customerName,
+            company_id: user.companyId,
+          })
+          .select("id")
+          .single()
+
+        if (createError || !newCustomer) {
+          throw new Error(`Error creating customer: ${createError?.message || "Unknown error"}`)
+        }
+
+        customerId = newCustomer.id
+        console.log("✅ Created new customer:", customerId)
+      }
+
+      // Get dispatcher ID (using the current user's ID)
+      const dispatcherId = user.id
+
+      // Generate unique load number
+      const finalLoadNumber = await generateUniqueLoadNumber(user.companyId, loadNumber || undefined)
+
+      // Create the load with all required fields
+      const loadData = {
+        load_number: finalLoadNumber, // Use the verified unique load number
+        reference_number: referenceNumber,
+        company_id: user.companyId,
+        customer_id: customerId,
+        dispatcher_id: dispatcherId,
+        status: "new",
+        pickup_address: pickupAddress,
+        pickup_city: pickupCity,
+        pickup_state: pickupState,
+        pickup_zip: pickupZip || null,
+        pickup_date: pickupDate,
+        pickup_time: pickupTime || null,
+        pickup_contact_name: pickupContactName || null,
+        pickup_contact_phone: pickupContactPhone || null,
+        pickup_operating_hours: pickupHours || null,
+        delivery_address: deliveryAddress,
+        delivery_city: deliveryCity,
+        delivery_state: deliveryState,
+        delivery_zip: deliveryZip || null,
+        delivery_date: deliveryDate,
+        delivery_time: deliveryTime || null,
+        rate: rate,
+        distance: distance,
+        weight: weight,
+        commodity: commodity || null,
+        special_instructions: specialInstructions || null,
+        vin_number: vinNumber || null,
+        equipment_type: equipmentType || null,
+        created_at: new Date().toISOString(),
+        appointment_number: appointmentNumber || null,
+        blob_url: documentUrl || null,
+        broker_email: brokerEmail || null,
+        rate_confirmation_pdf_url: documentUrl || null,
+      }
+
+      console.log("🚀 Creating load with unique load number:", finalLoadNumber)
+
+      const { data: newLoad, error: loadError } = await supabase.from("loads").insert(loadData).select().single()
+
+      if (loadError) {
+        console.error("❌ Error creating load:", loadError)
+        // Handle specific constraint violations
+        if (loadError.code === "23505" && loadError.message.includes("loads_company_id_load_number_key")) {
+          throw new Error("Load number already exists. Please try again or specify a different load number.")
+        }
+        throw new Error(`Error creating load: ${loadError.message}`)
+      }
+
+      console.log("✅ Load created successfully:", newLoad)
+
+      toast({
+        title: "Success",
+        description: `Load ${newLoad.load_number} created successfully`,
+      })
+
+      onClose()
+    } catch (error: any) {
+      console.error("❌ Error submitting form:", error)
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create load",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Get today's date in YYYY-MM-DD format for default values
+  const today = new Date().toISOString().split("T")[0]
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0]
+
+  const closePreview = () => {
+    setShowPreview(false)
+  }
+
+  const zoomIn = () => {
+    setZoomLevel((prev) => Math.min(prev + 10, 150))
+  }
+
+  const zoomOut = () => {
+    setZoomLevel((prev) => Math.max(prev - 10, 50))
+  }
+
+  const nextPage = () => {
+    if (currentPage < totalPages) {
+      renderPage(currentPage + 1)
+    }
+  }
+
+  const prevPage = () => {
+    if (currentPage > 1) {
+      renderPage(currentPage - 1)
+    }
+  }
+
+  const handleDownloadPDF = () => {
+    if (documentUrl) {
+      const a = document.createElement("a")
+      a.href = documentUrl
+      a.download = documentName || "document.pdf"
+      a.target = "_blank"
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    }
+  }
+
+  return (
+    <Dialog open={isModalOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-[90vw] max-h-[90vh] p-0 overflow-hidden flex">
+        {/* Document Preview Panel */}
+        {showPreview && (
+          <div className="w-1/2 border-r border-gray-200 flex flex-col h-[90vh]">
+            <div className="flex justify-between items-center p-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold">Document Preview</h2>
+              <Button variant="ghost" size="icon" onClick={closePreview}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="p-4 border-b border-gray-200">
+              <div className="flex items-center gap-2 bg-gray-100 p-2 rounded">
+                <FileText className="h-4 w-4 text-gray-500" />
+                <span className="text-sm truncate">{documentName}</span>
+                <Button variant="ghost" size="icon" className="ml-auto h-6 w-6">
+                  <X className="h-3 w-3" />
                 </Button>
               </div>
+            </div>
 
-              <div className="flex-1 overflow-auto bg-gray-100 p-4" style={{ maxHeight: "600px" }}>
-                <div className="flex justify-center min-h-full">
-                  {!pdfLoaded && !pdfRenderPending && (
-                    <div className="flex items-center justify-center w-72 h-96 bg-white border border-gray-300 rounded">
-                      <div className="text-center">
-                        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-gray-400" />
-                        <p className="text-sm text-gray-500">Loading PDF...</p>
-                      </div>
-                    </div>
+            <div className="flex-1 overflow-auto p-4 bg-gray-50">
+              {documentUrl && (
+                <div className="flex justify-center">
+                  {documentUrl.endsWith(".pdf") ? (
+                    <canvas
+                      ref={canvasRef}
+                      className="border border-gray-300 shadow-lg bg-white rounded"
+                      style={{ maxWidth: "100%", height: "auto" }}
+                    />
+                  ) : (
+                    <img
+                      src={documentUrl || "/placeholder.svg"}
+                      alt="Document preview"
+                      className="max-w-full object-contain border border-gray-300 shadow-lg bg-white rounded"
+                      style={{ maxHeight: "calc(90vh - 180px)", width: `${zoomLevel}%` }}
+                    />
                   )}
-                  {pdfRenderPending && (
-                    <div className="flex items-center justify-center w-72 h-96 bg-white border border-gray-300 rounded">
-                      <div className="text-center">
-                        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-gray-400" />
-                        <p className="text-sm text-gray-500">Preparing canvas...</p>
-                      </div>
-                    </div>
-                  )}
-                  <canvas
-                    ref={canvasRef}
-                    className={cn("border border-gray-300 shadow-lg bg-white rounded", !pdfLoaded && "hidden")}
-                    style={{
-                      maxWidth: "100%",
-                      height: "auto",
-                      display: pdfLoaded ? "block" : "none",
-                    }}
-                  />
-                </div>
-              </div>
-
-              {documentPreview === "PDF_DOCUMENT" && (
-                <div className="flex items-center justify-between p-3 bg-gray-50 border-t">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => renderPage(Math.max(1, currentPage - 1))}
-                      disabled={!pdfLoaded || currentPage <= 1}
-                    >
-                      Previous
-                    </Button>
-                    <span className="text-xs px-2">
-                      Page {currentPage} of {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => renderPage(Math.min(totalPages, currentPage + 1))}
-                      disabled={!pdfLoaded || currentPage >= totalPages}
-                    >
-                      Next
-                    </Button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        handlePDFZoom(Math.max(0.5, pdfScale - 0.25))
-                      }}
-                      disabled={!pdfLoaded}
-                    >
-                      <ZoomOut className="h-3 w-3" />
-                    </Button>
-                    <span className="text-xs px-3 py-1 bg-white border rounded">{Math.round(pdfScale * 100)}%</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        handlePDFZoom(Math.min(3, pdfScale + 0.25))
-                      }}
-                      disabled={!pdfLoaded}
-                    >
-                      <ZoomIn className="h-3 w-3" />
-                    </Button>
-                  </div>
                 </div>
               )}
             </div>
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-white rounded-lg border">
-              <img
-                src={documentPreview || "/placeholder.svg"}
-                alt="Document preview"
-                className="max-w-full max-h-full object-contain rounded"
-              />
+
+            <div className="flex justify-between items-center p-4 border-t border-gray-200 bg-white">
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={prevPage} disabled={currentPage <= 1}>
+                  <ChevronLeft className="h-4 w-4" />
+                  <span className="ml-1">Previous</span>
+                </Button>
+
+                <span className="text-sm text-gray-500">
+                  Page {currentPage} of {totalPages}
+                </span>
+
+                <Button variant="outline" size="sm" onClick={nextPage} disabled={currentPage >= totalPages}>
+                  <span className="mr-1">Next</span>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="icon" onClick={zoomOut}>
+                  <ZoomOut className="h-4 w-4" />
+                </Button>
+                <span className="text-sm">{zoomLevel}%</span>
+                <Button variant="outline" size="icon" onClick={zoomIn}>
+                  <ZoomIn className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon" onClick={handleDownloadPDF}>
+                  <Download className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
-          )}
-        </div>
 
-        <div className="mt-4 text-xs text-gray-500">
-          <p>✅ Document uploaded successfully</p>
-          <p>📊 Data extraction {processingStatus === "success" ? "completed" : "in progress"}</p>
-          {blobUrl && <p>☁️ Stored in cloud storage</p>}
-          {documentPreview === "PDF_DOCUMENT" && <p>🔍 Use zoom controls to adjust view</p>}
-        </div>
-      </div>
-    )
-  }
+            <div className="p-4 border-t border-gray-200 bg-white">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm text-green-600">
+                  <Check className="h-4 w-4" />
+                  <span>Document uploaded successfully</span>
+                </div>
+                {isExtracting ? (
+                  <div className="flex items-center gap-2 text-sm text-blue-600">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Extracting data from document...</span>
+                  </div>
+                ) : extractionSuccess ? (
+                  <div className="flex items-center gap-2 text-sm text-green-600">
+                    <BarChart className="h-4 w-4" />
+                    <span>Data extraction completed</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <BarChart className="h-4 w-4" />
+                    <span>Ready for data extraction</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <ZoomIn className="h-4 w-4" />
+                  <span>Use zoom controls to adjust view</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
-  const renderFormFields = () => (
-    <div className="space-y-6">
-      {/* Basic Load Information */}
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold">Load Information</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="reference">Reference Number *</Label>
-            <Input id="reference" value={formData.reference} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="loadNumber">Load Number</Label>
-            <Input id="loadNumber" value={formData.loadNumber} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="appointmentNumber">Appointment Number</Label>
-            <Input id="appointmentNumber" value={formData.appointmentNumber} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="customer">Customer/Broker *</Label>
-            <Input id="customer" value={formData.customer} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2 col-span-2">
-            <Label htmlFor="brokerEmail">Broker Email</Label>
-            <Input id="brokerEmail" type="email" value={formData.brokerEmail} onChange={handleInputChange} />
-          </div>
-        </div>
-      </div>
+        {/* Form Panel */}
+        <div className={cn("flex flex-col h-[90vh]", showPreview ? "w-1/2" : "w-full")}>
+          <DialogHeader className="px-6 py-4 border-b border-gray-200">
+            <DialogTitle>Create New Load</DialogTitle>
+            <p className="text-sm text-gray-500">
+              Upload a document for automatic data extraction or enter details manually
+            </p>
+          </DialogHeader>
 
-      {/* Origin Information */}
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold">Pickup Information</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2 col-span-2">
-            <Label htmlFor="originAddress">Pickup Address *</Label>
-            <Input id="originAddress" value={formData.originAddress} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="originCity">City *</Label>
-            <Input id="originCity" value={formData.originCity} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="originState">State *</Label>
-            <Select value={formData.originState} onValueChange={(value) => handleSelectChange("originState", value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select state" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="AL">Alabama</SelectItem>
-                <SelectItem value="AK">Alaska</SelectItem>
-                <SelectItem value="AZ">Arizona</SelectItem>
-                <SelectItem value="AR">Arkansas</SelectItem>
-                <SelectItem value="CA">California</SelectItem>
-                <SelectItem value="CO">Colorado</SelectItem>
-                <SelectItem value="CT">Connecticut</SelectItem>
-                <SelectItem value="DE">Delaware</SelectItem>
-                <SelectItem value="FL">Florida</SelectItem>
-                <SelectItem value="GA">Georgia</SelectItem>
-                <SelectItem value="HI">Hawaii</SelectItem>
-                <SelectItem value="ID">Idaho</SelectItem>
-                <SelectItem value="IL">Illinois</SelectItem>
-                <SelectItem value="IN">Indiana</SelectItem>
-                <SelectItem value="IA">Iowa</SelectItem>
-                <SelectItem value="KS">Kansas</SelectItem>
-                <SelectItem value="KY">Kentucky</SelectItem>
-                <SelectItem value="LA">Louisiana</SelectItem>
-                <SelectItem value="ME">Maine</SelectItem>
-                <SelectItem value="MD">Maryland</SelectItem>
-                <SelectItem value="MA">Massachusetts</SelectItem>
-                <SelectItem value="MI">Michigan</SelectItem>
-                <SelectItem value="MN">Minnesota</SelectItem>
-                <SelectItem value="MS">Mississippi</SelectItem>
-                <SelectItem value="MO">Missouri</SelectItem>
-                <SelectItem value="MT">Montana</SelectItem>
-                <SelectItem value="NE">Nebraska</SelectItem>
-                <SelectItem value="NV">Nevada</SelectItem>
-                <SelectItem value="NH">New Hampshire</SelectItem>
-                <SelectItem value="NJ">New Jersey</SelectItem>
-                <SelectItem value="NM">New Mexico</SelectItem>
-                <SelectItem value="NY">New York</SelectItem>
-                <SelectItem value="NC">North Carolina</SelectItem>
-                <SelectItem value="ND">North Dakota</SelectItem>
-                <SelectItem value="OH">Ohio</SelectItem>
-                <SelectItem value="OK">Oklahoma</SelectItem>
-                <SelectItem value="OR">Oregon</SelectItem>
-                <SelectItem value="PA">Pennsylvania</SelectItem>
-                <SelectItem value="RI">Rhode Island</SelectItem>
-                <SelectItem value="SC">South Carolina</SelectItem>
-                <SelectItem value="SD">South Dakota</SelectItem>
-                <SelectItem value="TN">Tennessee</SelectItem>
-                <SelectItem value="TX">Texas</SelectItem>
-                <SelectItem value="UT">Utah</SelectItem>
-                <SelectItem value="VT">Vermont</SelectItem>
-                <SelectItem value="VA">Virginia</SelectItem>
-                <SelectItem value="WA">Washington</SelectItem>
-                <SelectItem value="WV">West Virginia</SelectItem>
-                <SelectItem value="WI">Wisconsin</SelectItem>
-                <SelectItem value="WY">Wyoming</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="originZip">ZIP Code</Label>
-            <Input id="originZip" value={formData.originZip} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="pickupDate">Pickup Date *</Label>
-            <Input id="pickupDate" type="date" value={formData.pickupDate} onChange={handleInputChange} required />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="pickupTime">Pickup Time</Label>
-            <Input
-              id="pickupTime"
-              type="time"
-              value={formData.pickupTime}
-              onChange={handleInputChange}
-              placeholder="HH:MM"
-            />
-          </div>
-          <div className="space-y-2 col-span-2">
-            <Label htmlFor="pickupOperatingHours">Pickup Hours</Label>
-            <Input
-              id="pickupOperatingHours"
-              value={formData.pickupOperatingHours}
-              onChange={handleInputChange}
-              placeholder="e.g., Mon-Fri 8 AM - 5 PM, FCFS"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="pickupContactName">Pickup Contact Name</Label>
-            <Input id="pickupContactName" value={formData.pickupContactName} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="pickupContactPhone">Pickup Contact Phone</Label>
-            <Input id="pickupContactPhone" value={formData.pickupContactPhone} onChange={handleInputChange} />
-          </div>
-        </div>
-      </div>
-
-      {/* Destination Information */}
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold">Delivery Information</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2 col-span-2">
-            <Label htmlFor="destinationAddress">Delivery Address *</Label>
-            <Input id="destinationAddress" value={formData.destinationAddress} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="destinationCity">City *</Label>
-            <Input id="destinationCity" value={formData.destinationCity} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="destinationState">State *</Label>
-            <Select
-              value={formData.destinationState}
-              onValueChange={(value) => handleSelectChange("destinationState", value)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select state" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="AL">Alabama</SelectItem>
-                <SelectItem value="AK">Alaska</SelectItem>
-                <SelectItem value="AZ">Arizona</SelectItem>
-                <SelectItem value="AR">Arkansas</SelectItem>
-                <SelectItem value="CA">California</SelectItem>
-                <SelectItem value="CO">Colorado</SelectItem>
-                <SelectItem value="CT">Connecticut</SelectItem>
-                <SelectItem value="DE">Delaware</SelectItem>
-                <SelectItem value="FL">Florida</SelectItem>
-                <SelectItem value="GA">Georgia</SelectItem>
-                <SelectItem value="HI">Hawaii</SelectItem>
-                <SelectItem value="ID">Idaho</SelectItem>
-                <SelectItem value="IL">Illinois</SelectItem>
-                <SelectItem value="IN">Indiana</SelectItem>
-                <SelectItem value="IA">Iowa</SelectItem>
-                <SelectItem value="KS">Kansas</SelectItem>
-                <SelectItem value="KY">Kentucky</SelectItem>
-                <SelectItem value="LA">Louisiana</SelectItem>
-                <SelectItem value="ME">Maine</SelectItem>
-                <SelectItem value="MD">Maryland</SelectItem>
-                <SelectItem value="MA">Massachusetts</SelectItem>
-                <SelectItem value="MI">Michigan</SelectItem>
-                <SelectItem value="MN">Minnesota</SelectItem>
-                <SelectItem value="MS">Mississippi</SelectItem>
-                <SelectItem value="MO">Missouri</SelectItem>
-                <SelectItem value="MT">Montana</SelectItem>
-                <SelectItem value="NE">Nebraska</SelectItem>
-                <SelectItem value="NV">Nevada</SelectItem>
-                <SelectItem value="NH">New Hampshire</SelectItem>
-                <SelectItem value="NJ">New Jersey</SelectItem>
-                <SelectItem value="NM">New Mexico</SelectItem>
-                <SelectItem value="NY">New York</SelectItem>
-                <SelectItem value="NC">North Carolina</SelectItem>
-                <SelectItem value="ND">North Dakota</SelectItem>
-                <SelectItem value="OH">Ohio</SelectItem>
-                <SelectItem value="OK">Oklahoma</SelectItem>
-                <SelectItem value="OR">Oregon</SelectItem>
-                <SelectItem value="PA">Pennsylvania</SelectItem>
-                <SelectItem value="RI">Rhode Island</SelectItem>
-                <SelectItem value="SC">South Carolina</SelectItem>
-                <SelectItem value="SD">South Dakota</SelectItem>
-                <SelectItem value="TN">Tennessee</SelectItem>
-                <SelectItem value="TX">Texas</SelectItem>
-                <SelectItem value="UT">Utah</SelectItem>
-                <SelectItem value="VT">Vermont</SelectItem>
-                <SelectItem value="VA">Virginia</SelectItem>
-                <SelectItem value="WA">Washington</SelectItem>
-                <SelectItem value="WV">West Virginia</SelectItem>
-                <SelectItem value="WI">Wisconsin</SelectItem>
-                <SelectItem value="WY">Wyoming</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="destinationZip">ZIP Code</Label>
-            <Input id="destinationZip" value={formData.destinationZip} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="deliveryDate">Delivery Date *</Label>
-            <Input id="deliveryDate" type="date" value={formData.deliveryDate} onChange={handleInputChange} required />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="deliveryTime">Delivery Time</Label>
-            <Input
-              id="deliveryTime"
-              type="time"
-              value={formData.deliveryTime}
-              onChange={handleInputChange}
-              placeholder="HH:MM"
-            />
-          </div>
-          <div className="space-y-2 col-span-2">
-            <Label htmlFor="deliveryOperatingHours">Delivery Hours</Label>
-            <Input
-              id="deliveryOperatingHours"
-              value={formData.deliveryOperatingHours}
-              onChange={handleInputChange}
-              placeholder="e.g., Mon-Fri 8 AM - 5 PM, Appt. Only"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="deliveryContactName">Delivery Contact Name</Label>
-            <Input id="deliveryContactName" value={formData.deliveryContactName} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="deliveryContactPhone">Delivery Contact Phone</Label>
-            <Input id="deliveryContactPhone" value={formData.deliveryContactPhone} onChange={handleInputChange} />
-          </div>
-        </div>
-      </div>
-
-      {/* Load Details */}
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold">Load Details</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="commodity">Commodity *</Label>
-            <Input id="commodity" value={formData.commodity} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="weight">Weight (lbs)</Label>
-            <Input id="weight" value={formData.weight} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="pieces">Number of Pieces</Label>
-            <Input id="pieces" value={formData.pieces} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="dimensions">Dimensions</Label>
-            <Input id="dimensions" placeholder="L x W x H" value={formData.dimensions} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="equipment">Equipment Type</Label>
-            <Select value={formData.equipment} onValueChange={(value) => handleSelectChange("equipment", value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select equipment" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="dry-van">Dry Van</SelectItem>
-                <SelectItem value="reefer">Refrigerated</SelectItem>
-                <SelectItem value="flatbed">Flatbed</SelectItem>
-                <SelectItem value="step-deck">Step Deck</SelectItem>
-                <SelectItem value="lowboy">Lowboy</SelectItem>
-                <SelectItem value="car-carrier">Car Carrier</SelectItem>
-                <SelectItem value="tanker">Tanker</SelectItem>
-                <SelectItem value="box-truck">Box Truck</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="rate">Rate ($)</Label>
-            <Input id="rate" value={formData.rate} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="mileage">Estimated Mileage</Label>
-            <Input id="mileage" value={formData.mileage} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="vin">VIN (if applicable)</Label>
-            <Input id="vin" value={formData.vin} onChange={handleInputChange} />
-          </div>
-        </div>
-      </div>
-
-      {/* Driver Information */}
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold">Driver Information</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="driverName">Driver Name</Label>
-            <Input id="driverName" value={formData.driverName} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="driverPhone">Driver Phone</Label>
-            <Input id="driverPhone" value={formData.driverPhone} onChange={handleInputChange} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="driverEmail">Driver Email</Label>
-            <Input id="driverEmail" type="email" value={formData.driverEmail} onChange={handleInputChange} />
-          </div>
-        </div>
-      </div>
-
-      {/* Additional Information */}
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold">Additional Information</h3>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="detentionPolicy">Detention Policy</Label>
-            <Input
-              id="detentionPolicy"
-              value={formData.detentionPolicy}
-              onChange={handleInputChange}
-              placeholder="e.g., $75/hr after 2 hours free"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="accessorialCharges">Accessorial Charges</Label>
-            <Input
-              id="accessorialCharges"
-              value={formData.accessorialCharges}
-              onChange={handleInputChange}
-              placeholder="e.g., Lumper fee: $150"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="specialInstructions">Special Instructions</Label>
-            <Textarea
-              id="specialInstructions"
-              value={formData.specialInstructions}
-              onChange={handleInputChange}
-              className="min-h-[80px]"
-              placeholder="Include pickup/delivery hours, special requirements, etc."
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="notes">Internal Notes</Label>
-            <Textarea id="notes" value={formData.notes} onChange={handleInputChange} className="min-h-[80px]" />
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-
-  return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[1200px] max-h-[90vh] overflow-hidden p-0">
-        <div className="flex h-[80vh]">
-          {/* Document Preview - Left Side */}
-          {documentPreview && renderDocumentPreview()}
-
-          {/* Form Content - Right Side */}
-          <div className="flex-1 flex flex-col">
-            <DialogHeader className="p-6 pb-4">
-              <DialogTitle>Create New Load</DialogTitle>
-              <DialogDescription>
-                Upload a document for automatic data extraction or enter details manually
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="flex-1 overflow-hidden px-6">
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-                <TabsList className="grid w-full grid-cols-3 mb-4">
+          <div className="flex-1 overflow-y-auto">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <div className="px-6 py-4">
+                <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="manual">Manual Entry</TabsTrigger>
                   <TabsTrigger value="upload">Upload Document</TabsTrigger>
-                  <TabsTrigger value="review" disabled={!extractedData}>
+                  <TabsTrigger value="review" disabled={!extractedData} className="relative">
                     Review & Edit
+                    {isExtracting && <Loader2 className="h-3 w-3 animate-spin ml-2 text-primary" />}
                   </TabsTrigger>
                 </TabsList>
+              </div>
 
-                <div className="flex-1 overflow-y-auto">
-                  <TabsContent value="manual" className="space-y-4 py-4 mt-0">
-                    {renderFormFields()}
-                  </TabsContent>
+              <TabsContent value="upload" className="p-6 space-y-6 relative">
+                <div
+                  className="border-2 border-dashed rounded-lg p-10 text-center cursor-pointer hover:bg-gray-50 transition-colors"
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    className="hidden"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    onChange={(e) => e.target.files && e.target.files[0] && handleFileUpload(e.target.files[0])}
+                  />
+                  <FileUp className="mx-auto h-12 w-12 text-gray-400" />
+                  <h3 className="mt-2 text-lg font-semibold">Upload Bill of Lading</h3>
+                  <p className="text-sm text-gray-500">Drag & drop or click to select PDF/image files</p>
+                </div>
 
-                  <TabsContent value="upload" className="space-y-4 py-4 mt-0">
-                    <div className="space-y-4">
-                      {/* File Upload Area */}
-                      <div
-                        className={cn(
-                          "flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 text-center",
-                          isDragging ? "border-primary bg-primary/5" : "border-border",
-                          processingStatus === "processing" && "pointer-events-none opacity-60",
-                        )}
-                        {...handleDragEvents}
-                        onClick={() => fileInputRef.current?.click()}
-                      >
-                        <input
-                          type="file"
-                          ref={fileInputRef}
-                          className="hidden"
-                          accept=".pdf,image/*"
-                          onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
-                        />
+                <div className="space-y-2">
+                  <h3 className="text-sm font-medium">Or enter image URL</h3>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="https://example.com/bill-of-lading.jpg"
+                      value={imageUrl}
+                      onChange={(e) => setImageUrl(e.target.value)}
+                    />
+                    <Button onClick={handleUrlSubmit} disabled={!imageUrl || isExtracting} type="button">
+                      {isExtracting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
 
-                        {processingStatus === "idle" && (
-                          <>
-                            <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-                            <h3 className="text-lg font-semibold">Upload Bill of Lading</h3>
-                            <p className="text-sm text-muted-foreground">
-                              Drag & drop or click to select PDF/image files
-                            </p>
-                          </>
-                        )}
+                {isExtracting && (
+                  <div className="absolute inset-0 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center z-10 rounded-lg">
+                    <div className="bg-white p-8 rounded-lg shadow-lg border max-w-md w-full mx-4">
+                      <div className="text-center space-y-4">
+                        <div className="relative">
+                          <Loader2 className="h-12 w-12 animate-spin mx-auto text-primary" />
+                          <div className="absolute inset-0 rounded-full border-2 border-primary/20"></div>
+                        </div>
+                        <div className="space-y-2">
+                          <h3 className="text-lg font-semibold text-gray-900">Processing Document</h3>
+                          <p className="text-sm text-gray-600">
+                            {currentExtractionStep === "upload" && "Uploading your document..."}
+                            {currentExtractionStep === "ocr" && "OCR processing document..."}
+                            {currentExtractionStep === "ai" && "AI extracting load information..."}
+                            {currentExtractionStep === "form" && "Preparing form data..."}
+                          </p>
+                          <Progress value={extractionProgress} className="h-2" />
+                          <p className="text-xs text-gray-500 mt-1">{extractionProgress}% complete</p>
+                        </div>
 
-                        {processingStatus === "uploading" && (
-                          <>
-                            <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
-                            <h3 className="text-lg font-semibold">Uploading to Cloud</h3>
-                            <p className="text-sm text-muted-foreground">{statusMessage}</p>
-                          </>
-                        )}
+                        <div className="bg-gray-50 p-3 rounded-md">
+                          <div className="text-xs text-gray-600 space-y-2">
+                            {extractionSteps.map((step) => (
+                              <div key={step.id} className="flex items-center space-x-2">
+                                {step.status === "pending" && (
+                                  <div className="w-4 h-4 flex items-center justify-center">
+                                    <div className="w-2 h-2 bg-gray-300 rounded-full"></div>
+                                  </div>
+                                )}
+                                {step.status === "processing" && (
+                                  <div className="w-4 h-4 flex items-center justify-center text-primary">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  </div>
+                                )}
+                                {step.status === "completed" && (
+                                  <div className="w-4 h-4 flex items-center justify-center text-green-500">
+                                    <CheckCircle2 className="w-4 h-4" />
+                                  </div>
+                                )}
+                                {step.status === "error" && (
+                                  <div className="w-4 h-4 flex items-center justify-center text-red-500">
+                                    <X className="w-4 h-4" />
+                                  </div>
+                                )}
+                                <span
+                                  className={cn(
+                                    "flex-1",
+                                    step.status === "processing" && "text-primary font-medium",
+                                    step.status === "completed" && "text-green-600",
+                                    step.status === "error" && "text-red-500",
+                                  )}
+                                >
+                                  {step.label}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
 
-                        {processingStatus === "processing" && (
-                          <>
-                            <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
-                            <h3 className="text-lg font-semibold">Processing Document</h3>
-                            <p className="text-sm text-muted-foreground">{statusMessage}</p>
-                          </>
-                        )}
-
-                        {processingStatus === "success" && (
-                          <>
-                            <CheckCircle2 className="h-8 w-8 text-green-500 mb-2" />
-                            <h3 className="text-lg font-semibold">Success!</h3>
-                            <p className="text-sm text-muted-foreground">{statusMessage}</p>
-                          </>
-                        )}
-
-                        {processingStatus === "error" && (
-                          <>
-                            <AlertCircle className="h-8 w-8 text-destructive mb-2" />
-                            <h3 className="text-lg font-semibold">Processing Failed</h3>
-                            <p className="text-sm text-muted-foreground">{statusMessage}</p>
-                          </>
-                        )}
-                      </div>
-
-                      {/* URL Input Alternative */}
-                      <div className="space-y-2">
-                        <Label htmlFor="imageUrl">Or enter image URL</Label>
-                        <div className="flex gap-2">
-                          <Input
-                            id="imageUrl"
-                            placeholder="https://example.com/bill-of-lading.jpg"
-                            value={imageUrl}
-                            onChange={(e) => setImageUrl(e.target.value)}
-                          />
-                          <Button onClick={processImageUrl} disabled={processingStatus === "processing"}>
-                            <Wand2 className="h-4 w-4" />
-                          </Button>
+                        <div className="text-xs text-gray-500 italic">
+                          This may take up to 30 seconds depending on document complexity
                         </div>
                       </div>
                     </div>
-                  </TabsContent>
+                  </div>
+                )}
+              </TabsContent>
 
-                  <TabsContent value="review" className="space-y-4 py-4 mt-0">
-                    {extractedData && (
-                      <div className="space-y-4">
-                        <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                          <h4 className="font-semibold text-green-800 mb-2">✅ Data Extracted Successfully</h4>
-                          <p className="text-sm text-green-700">
-                            Review the extracted information below and make any necessary corrections before creating
-                            the load.
-                          </p>
-                        </div>
-                        {missingFields.length > 0 && (
-                          <Alert variant="destructive">
-                            <AlertCircle className="h-4 w-4" />
-                            <AlertTitle>Missing Information</AlertTitle>
-                            <AlertDescription>
-                              The AI could not find the following fields. Please review the document and fill them in
-                              manually: {missingFields.join(", ")}.
-                            </AlertDescription>
-                          </Alert>
-                        )}
-                        {renderFormFields()}
+              <TabsContent value="manual">
+                <form id="manual-form" onSubmit={handleSubmit} className="space-y-6 p-6">
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Load Information</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="reference_number">Reference Number *</Label>
+                        <Input id="reference_number" name="reference_number" required />
                       </div>
-                    )}
-                  </TabsContent>
-                </div>
-              </Tabs>
-            </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="load_number">Load Number</Label>
+                        <Input id="load_number" name="load_number" placeholder="Auto-generated if empty" />
+                      </div>
+                    </div>
 
-            <DialogFooter className="p-6 pt-4">
-              <Button variant="outline" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={
-                  !formData.reference ||
-                  !formData.originAddress ||
-                  !formData.destinationAddress ||
-                  !formData.pickupDate ||
-                  !formData.deliveryDate ||
-                  !formData.commodity
-                }
-              >
-                Create Load
-              </Button>
-            </DialogFooter>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="appointment_number">Appointment Number</Label>
+                        <Input id="appointment_number" name="appointment_number" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="customer_name">Customer/Broker *</Label>
+                        <Input id="customer_name" name="customer_name" required />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="broker_email">Broker Email</Label>
+                      <Input id="broker_email" name="broker_email" type="email" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Pickup Information</h3>
+                    <div className="space-y-2">
+                      <Label htmlFor="pickup_address">Pickup Address *</Label>
+                      <Input id="pickup_address" name="pickup_address" required />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="pickup_city">City *</Label>
+                        <Input id="pickup_city" name="pickup_city" required />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="pickup_state">State *</Label>
+                        <Input id="pickup_state" name="pickup_state" required />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="pickup_zip">ZIP Code</Label>
+                        <Input id="pickup_zip" name="pickup_zip" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="pickup_date">Pickup Date *</Label>
+                        <Input id="pickup_date" name="pickup_date" type="date" defaultValue={today} required />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="pickup_time">Pickup Time</Label>
+                      <Input id="pickup_time" name="pickup_time" type="time" />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="pickup_hours">Pickup Hours</Label>
+                      <Input id="pickup_hours" name="pickup_hours" placeholder="e.g., 8:00 AM - 5:00 PM" />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="pickup_contact_name">Pickup Contact Name</Label>
+                        <Input id="pickup_contact_name" name="pickup_contact_name" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="pickup_contact_phone">Pickup Contact Phone</Label>
+                        <Input id="pickup_contact_phone" name="pickup_contact_phone" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Delivery Information</h3>
+                    <div className="space-y-2">
+                      <Label htmlFor="delivery_address">Delivery Address *</Label>
+                      <Input id="delivery_address" name="delivery_address" required />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="delivery_city">City *</Label>
+                        <Input id="delivery_city" name="delivery_city" required />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="delivery_state">State *</Label>
+                        <Input id="delivery_state" name="delivery_state" required />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="delivery_zip">ZIP Code</Label>
+                        <Input id="delivery_zip" name="delivery_zip" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="delivery_date">Delivery Date *</Label>
+                        <Input id="delivery_date" name="delivery_date" type="date" defaultValue={tomorrow} required />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="delivery_time">Delivery Time</Label>
+                      <Input id="delivery_time" name="delivery_time" type="time" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Load Details</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="rate">Rate ($)</Label>
+                        <Input id="rate" name="rate" type="number" min="0" step="0.01" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="distance">Distance (miles)</Label>
+                        <Input id="distance" name="distance" type="number" min="0" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="weight">Weight (lbs)</Label>
+                        <Input id="weight" name="weight" type="number" min="0" />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="commodity">Commodity</Label>
+                        <Input id="commodity" name="commodity" placeholder="e.g., Electronics, Food, etc." />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="equipment_type">Equipment Type</Label>
+                        <Input id="equipment_type" name="equipment_type" defaultValue="dry_van" />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="vin_number">VIN Number</Label>
+                      <Input id="vin_number" name="vin_number" />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="special_instructions">Special Instructions</Label>
+                      <Textarea id="special_instructions" name="special_instructions" />
+                    </div>
+                  </div>
+                </form>
+              </TabsContent>
+
+              <TabsContent value="review">
+                {extractedData && (
+                  <form id="review-form" onSubmit={handleSubmit} className="space-y-6 p-6">
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold">Load Information</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="reference_number">Reference Number *</Label>
+                          <Input
+                            id="reference_number"
+                            name="reference_number"
+                            defaultValue={extractedData.loadNumber || ""}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="load_number">Load Number</Label>
+                          <Input
+                            id="load_number"
+                            name="load_number"
+                            defaultValue={extractedData.loadNumber || ""}
+                            placeholder="Auto-generated if empty"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="appointment_number">Appointment Number</Label>
+                          <Input
+                            id="appointment_number"
+                            name="appointment_number"
+                            defaultValue={extractedData.appointmentNumber || ""}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="customer_name">Customer/Broker *</Label>
+                          <Input
+                            id="customer_name"
+                            name="customer_name"
+                            defaultValue={extractedData.broker?.name || ""}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="broker_email">Broker Email</Label>
+                        <Input
+                          id="broker_email"
+                          name="broker_email"
+                          type="email"
+                          defaultValue={extractedData.broker?.email || ""}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold">Pickup Information</h3>
+                      <div className="space-y-2">
+                        <Label htmlFor="pickup_address">Pickup Address *</Label>
+                        <Input
+                          id="pickup_address"
+                          name="pickup_address"
+                          defaultValue={extractedData.pickupLocation?.address || ""}
+                          required
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="pickup_city">City *</Label>
+                          <Input
+                            id="pickup_city"
+                            name="pickup_city"
+                            defaultValue={extractedData.pickupLocation?.city || ""}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="pickup_state">State *</Label>
+                          <Input
+                            id="pickup_state"
+                            name="pickup_state"
+                            defaultValue={extractedData.pickupLocation?.state || ""}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="pickup_zip">ZIP Code</Label>
+                          <Input
+                            id="pickup_zip"
+                            name="pickup_zip"
+                            defaultValue={extractedData.pickupLocation?.zip || ""}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="pickup_date">Pickup Date *</Label>
+                          <Input
+                            id="pickup_date"
+                            name="pickup_date"
+                            type="date"
+                            defaultValue={extractedData.pickupDate?.split("T")[0] || today}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="pickup_time">Pickup Time</Label>
+                        <Input
+                          id="pickup_time"
+                          name="pickup_time"
+                          type="time"
+                          defaultValue={extractedData.pickupDate?.split("T")[1]?.substring(0, 5) || ""}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="pickup_hours">Pickup Hours</Label>
+                        <Input
+                          id="pickup_hours"
+                          name="pickup_hours"
+                          defaultValue={extractedData.pickupLocation?.operatingHours || ""}
+                          placeholder="e.g., 8:00 AM - 5:00 PM"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="pickup_contact_name">Pickup Contact Name</Label>
+                          <Input
+                            id="pickup_contact_name"
+                            name="pickup_contact_name"
+                            defaultValue={extractedData.pickupLocation?.contactName || ""}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="pickup_contact_phone">Pickup Contact Phone</Label>
+                          <Input
+                            id="pickup_contact_phone"
+                            name="pickup_contact_phone"
+                            defaultValue={extractedData.pickupLocation?.contactPhone || ""}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold">Delivery Information</h3>
+                      <div className="space-y-2">
+                        <Label htmlFor="delivery_address">Delivery Address *</Label>
+                        <Input
+                          id="delivery_address"
+                          name="delivery_address"
+                          defaultValue={extractedData.deliveryLocation?.address || ""}
+                          required
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="delivery_city">City *</Label>
+                          <Input
+                            id="delivery_city"
+                            name="delivery_city"
+                            defaultValue={extractedData.deliveryLocation?.city || ""}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="delivery_state">State *</Label>
+                          <Input
+                            id="delivery_state"
+                            name="delivery_state"
+                            defaultValue={extractedData.deliveryLocation?.state || ""}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="delivery_zip">ZIP Code</Label>
+                          <Input
+                            id="delivery_zip"
+                            name="delivery_zip"
+                            defaultValue={extractedData.deliveryLocation?.zip || ""}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="delivery_date">Delivery Date *</Label>
+                          <Input
+                            id="delivery_date"
+                            name="delivery_date"
+                            type="date"
+                            defaultValue={extractedData.deliveryDate?.split("T")[0] || tomorrow}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="delivery_time">Delivery Time</Label>
+                        <Input
+                          id="delivery_time"
+                          name="delivery_time"
+                          type="time"
+                          defaultValue={extractedData.deliveryDate?.split("T")[1]?.substring(0, 5) || ""}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold">Load Details</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="rate">Rate ($)</Label>
+                          <Input
+                            id="rate"
+                            name="rate"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            defaultValue={extractedData.rate || ""}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="distance">Distance (miles)</Label>
+                          <Input id="distance" name="distance" type="number" min="0" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="weight">Weight (lbs)</Label>
+                          <Input
+                            id="weight"
+                            name="weight"
+                            type="number"
+                            min="0"
+                            defaultValue={extractedData.weight || ""}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="commodity">Commodity</Label>
+                          <Input
+                            id="commodity"
+                            name="commodity"
+                            defaultValue={extractedData.commodity || ""}
+                            placeholder="e.g., Electronics, Food, etc."
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="equipment_type">Equipment Type</Label>
+                          <Input id="equipment_type" name="equipment_type" defaultValue="dry_van" />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="vin_number">VIN Number</Label>
+                        <Input id="vin_number" name="vin_number" defaultValue={extractedData.vin || ""} />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="special_instructions">Special Instructions</Label>
+                        <Textarea
+                          id="special_instructions"
+                          name="special_instructions"
+                          defaultValue={extractedData.specialInstructions || ""}
+                        />
+                      </div>
+                    </div>
+                  </form>
+                )}
+              </TabsContent>
+            </Tabs>
           </div>
+
+          <DialogFooter className="px-6 py-4 border-t border-gray-200">
+            <Button variant="outline" onClick={onClose} disabled={isLoading}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form={activeTab === "manual" ? "manual-form" : "review-form"}
+              disabled={isLoading || (activeTab === "review" && !extractedData)}
+            >
+              {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Create Load
+            </Button>
+          </DialogFooter>
         </div>
       </DialogContent>
     </Dialog>
