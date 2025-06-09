@@ -2,12 +2,14 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { TrendingUp, TrendingDown, DollarSign, Truck, Users } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 interface DashboardStatsProps {
   loads: any[]
+  className?: string
 }
 
-export function DashboardStats({ loads }: DashboardStatsProps) {
+export function DashboardStats({ loads, className }: DashboardStatsProps) {
   // Calculate stats safely
   const totalLoads = loads.length
   const activeLoads = loads.filter(
@@ -72,7 +74,7 @@ export function DashboardStats({ loads }: DashboardStatsProps) {
   ]
 
   return (
-    <>
+    <div className={cn("grid gap-4 md:grid-cols-2 lg:grid-cols-4", className)}>
       {stats.map((stat, index) => (
         <Card key={index}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -89,6 +91,6 @@ export function DashboardStats({ loads }: DashboardStatsProps) {
           </CardContent>
         </Card>
       ))}
-    </>
+    </div>
   )
 }

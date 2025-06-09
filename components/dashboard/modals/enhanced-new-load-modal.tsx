@@ -20,7 +20,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
 import { Upload, Loader2, CheckCircle2, AlertCircle, Wand2, X, FileText, ZoomIn, ZoomOut } from "lucide-react"
-import { tempDocumentStorage } from "@/lib/temp-document-storage"
 import { cn } from "@/lib/utils"
 
 interface EnhancedNewLoadModalProps {
@@ -55,6 +54,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const pdfDocRef = useRef<any>(null)
   const pendingPdfDataRef = useRef<string | null>(null)
+  const [blobUrl, setBlobUrl] = useState<string | null>(null) // Store Vercel Blob URL
   const [formData, setFormData] = useState({
     // Basic Load Information
     reference: "",
@@ -114,7 +114,6 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
   const [currentPage, setCurrentPage] = useState(1)
-  const [tempPdfId, setTempPdfId] = useState<string | null>(null)
   const [totalPages, setTotalPages] = useState(1)
 
   // Load PDF.js when component mounts
@@ -122,7 +121,6 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     const loadPDFJS = async () => {
       if (typeof window !== "undefined" && !window.pdfjsLib) {
         try {
-          // Load PDF.js from CDN
           const script = document.createElement("script")
           script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
           script.onload = () => {
@@ -155,8 +153,26 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     }
   }, [documentPreview, pdfRenderPending])
 
+  const uploadToBlob = async (file: File): Promise<string> => {
+    const formData = new FormData()
+    formData.append("file", file)
+
+    const response = await fetch("/api/blob/upload", {
+      method: "POST",
+      body: formData,
+    })
+
+    const result = await response.json()
+
+    if (!result.success) {
+      throw new Error(result.error || "Failed to upload file")
+    }
+
+    return result.data.url
+  }
+
   const displayPDFPreview = useCallback(
-    async (base64Content: string) => {
+    async (dataUrlOrBlobUrl: string) => {
       console.log("Starting PDF preview display...")
 
       if (!window.pdfjsLib) {
@@ -171,7 +187,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
 
       if (!canvasRef.current) {
         console.log("Canvas ref not available yet, storing PDF data for later rendering...")
-        pendingPdfDataRef.current = base64Content
+        pendingPdfDataRef.current = dataUrlOrBlobUrl
         setPdfRenderPending(true)
         return
       }
@@ -179,20 +195,33 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
       try {
         console.log("Processing PDF data...")
 
-        // Convert base64 to Uint8Array
-        const base64Data = base64Content.includes(",") ? base64Content.split(",")[1] : base64Content
-        const binaryString = atob(base64Data)
-        const bytes = new Uint8Array(binaryString.length)
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i)
+        let pdfData: Uint8Array
+
+        if (dataUrlOrBlobUrl.startsWith("data:")) {
+          // Handle data URL (base64)
+          const base64Data = dataUrlOrBlobUrl.includes(",") ? dataUrlOrBlobUrl.split(",")[1] : dataUrlOrBlobUrl
+          const binaryString = atob(base64Data)
+          const bytes = new Uint8Array(binaryString.length)
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i)
+          }
+          pdfData = bytes
+        } else {
+          // Handle blob URL - fetch the data
+          const response = await fetch(dataUrlOrBlobUrl)
+          if (!response.ok) {
+            throw new Error(`Failed to fetch PDF: ${response.statusText}`)
+          }
+          const arrayBuffer = await response.arrayBuffer()
+          pdfData = new Uint8Array(arrayBuffer)
         }
 
-        console.log("PDF bytes length:", bytes.length)
+        console.log("PDF bytes length:", pdfData.length)
 
         // Load PDF document
         console.log("Loading PDF document...")
         const loadingTask = window.pdfjsLib.getDocument({
-          data: bytes,
+          data: pdfData,
           cMapUrl: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/",
           cMapPacked: true,
         })
@@ -217,7 +246,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
 
         // Calculate scale to fit container with better quality
         const viewport = page.getViewport({ scale: 1.0 })
-        const containerWidth = 550 // Increased container width
+        const containerWidth = 550
         const scale = Math.min(containerWidth / viewport.width, pdfScale)
         const scaledViewport = page.getViewport({ scale })
 
@@ -343,7 +372,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     }))
   }
 
-  const handleFileSelect = (file: File) => {
+  const handleFileSelect = async (file: File) => {
     if (!file) return
 
     if (file.type !== "application/pdf" && !file.type.startsWith("image/")) {
@@ -356,48 +385,50 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     }
 
     setSelectedFile(file)
-    setTempPdfId(null) // Reset tempPdfId for new file
+    setProcessingStatus("uploading")
+    setStatusMessage("Uploading file to cloud storage...")
 
-    // Store PDF in tempDocumentStorage
-    if (file.type === "application/pdf") {
-      const newTempPdfId = tempDocumentStorage.store(file)
-      setTempPdfId(newTempPdfId)
-      console.log("Stored PDF in temp storage with ID:", newTempPdfId)
-    }
+    try {
+      // Upload to Vercel Blob
+      const uploadedBlobUrl = await uploadToBlob(file)
+      setBlobUrl(uploadedBlobUrl)
+      console.log("File uploaded to blob:", uploadedBlobUrl)
 
-    // Create preview for images and PDFs
-    if (file.type.startsWith("image/")) {
+      // Create preview for images and PDFs
+      if (file.type.startsWith("image/")) {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          if (e.target?.result) {
+            setDocumentPreview(e.target.result as string)
+          }
+        }
+        reader.readAsDataURL(file)
+      } else if (file.type === "application/pdf") {
+        setDocumentPreview("PDF_DOCUMENT")
+        // Use the blob URL for PDF preview
+        setTimeout(() => {
+          displayPDFPreview(uploadedBlobUrl)
+        }, 100)
+      }
+
+      // Process document for data extraction
       const reader = new FileReader()
       reader.onload = (e) => {
         if (e.target?.result) {
-          setDocumentPreview(e.target.result as string)
+          processDocument(e.target.result as string)
         }
       }
       reader.readAsDataURL(file)
-    } else if (file.type === "application/pdf") {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        if (e.target?.result) {
-          const dataUrl = e.target.result as string
-          setPdfDataUrl(dataUrl)
-          setDocumentPreview("PDF_DOCUMENT")
-          // Use setTimeout to ensure the canvas is rendered before trying to use it
-          setTimeout(() => {
-            displayPDFPreview(dataUrl)
-          }, 100)
-        }
-      }
-      reader.readAsDataURL(file)
+    } catch (error) {
+      console.error("Error uploading file:", error)
+      setProcessingStatus("error")
+      setStatusMessage(error instanceof Error ? error.message : "Failed to upload file")
+      toast({
+        title: "Upload Failed",
+        description: "Could not upload file to cloud storage",
+        variant: "destructive",
+      })
     }
-
-    // Convert file to data URL for processing
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      if (e.target?.result) {
-        processDocument(e.target.result as string)
-      }
-    }
-    reader.readAsDataURL(file)
   }
 
   const processDocument = async (dataUrl: string) => {
@@ -520,10 +551,8 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   const extractDateOnly = (dateString: string | null): string => {
     if (!dateString) return ""
     try {
-      // Handle various date formats
       const date = new Date(dateString)
       if (isNaN(date.getTime())) {
-        // Try parsing common date formats manually
         const dateMatch = dateString.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/)
         if (dateMatch) {
           const [, month, day, year] = dateMatch
@@ -531,7 +560,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
         }
         return ""
       }
-      return date.toISOString().split("T")[0] // YYYY-MM-DD format
+      return date.toISOString().split("T")[0]
     } catch {
       return ""
     }
@@ -540,18 +569,15 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   const extractTimeOnly = (dateString: string | null): string => {
     if (!dateString) return ""
     try {
-      // First try to parse as a full datetime
       const date = new Date(dateString)
       if (!isNaN(date.getTime())) {
         const hours = date.getHours()
         const minutes = date.getMinutes()
-        // Only return time if it's not midnight (00:00) which might be a default
         if (hours !== 0 || minutes !== 0) {
           return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
         }
       }
 
-      // Try to extract time patterns directly from the string
       const timePatterns = [/(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)/i, /(\d{1,2}):(\d{2})/, /(\d{1,2})\s*(AM|PM|am|pm)/i]
 
       for (const pattern of timePatterns) {
@@ -561,7 +587,6 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
           const minute = match[2] ? Number.parseInt(match[2]) : 0
           const ampm = match[3]
 
-          // Convert to 24-hour format
           if (ampm && ampm.toLowerCase() === "pm" && hour !== 12) {
             hour += 12
           } else if (ampm && ampm.toLowerCase() === "am" && hour === 12) {
@@ -581,7 +606,6 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
   const extractTimeFromInstructions = (instructions: string | null, type: "pickup" | "delivery"): string => {
     if (!instructions) return ""
 
-    // Look for specific appointment times first
     const apptPatterns = [
       /appt at (\d{1,2}:?\d{2}\s*[ap]m)/i,
       /appointment at (\d{1,2}:?\d{2}\s*[ap]m)/i,
@@ -653,8 +677,8 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
         formData.deliveryDate && formData.deliveryTime
           ? `${formData.deliveryDate}T${formData.deliveryTime}`
           : formData.deliveryDate,
+      blobUrl: blobUrl, // Include the Vercel Blob URL
     }
-    processedData.tempPdfId = tempPdfId // Add tempPdfId
 
     onSubmit(processedData)
     resetForm()
@@ -678,7 +702,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
     pendingPdfDataRef.current = null
     setCurrentPage(1)
     setTotalPages(1)
-    setTempPdfId(null)
+    setBlobUrl(null)
 
     setFormData({
       reference: "",
@@ -739,26 +763,20 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
         throw new Error("Could not get canvas context")
       }
 
-      // Calculate scale to fit container with better quality
       const viewport = page.getViewport({ scale: 1.0 })
-      const containerWidth = 550 // Increased container width
+      const containerWidth = 550
       const scale = Math.min(containerWidth / viewport.width, pdfScale)
       const scaledViewport = page.getViewport({ scale })
 
-      // Set device pixel ratio for better quality
       const devicePixelRatio = window.devicePixelRatio || 1
       canvas.height = scaledViewport.height * devicePixelRatio
       canvas.width = scaledViewport.width * devicePixelRatio
       canvas.style.width = scaledViewport.width + "px"
       canvas.style.height = scaledViewport.height + "px"
 
-      // Scale the context for high DPI displays
       context.scale(devicePixelRatio, devicePixelRatio)
-
-      // Clear canvas
       context.clearRect(0, 0, canvas.width, canvas.height)
 
-      // Render page
       const renderContext = {
         canvasContext: context,
         viewport: scaledViewport,
@@ -772,7 +790,6 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
       console.error("Error rendering PDF:", error)
       setPdfLoaded(false)
 
-      // Show fallback message
       if (canvasRef.current) {
         const canvas = canvasRef.current
         const context = canvas.getContext("2d")
@@ -821,13 +838,13 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
         </div>
 
         <div className="flex-1 flex flex-col">
-          {documentPreview === "PDF_DOCUMENT" && pdfDataUrl ? (
+          {documentPreview === "PDF_DOCUMENT" ? (
             <div className="w-full h-full bg-white rounded-lg border overflow-hidden flex flex-col">
-              {/* PDF Header with just file info */}
               <div className="flex items-center justify-between p-3 bg-gray-100 border-b">
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-gray-600" />
                   <span className="text-sm font-medium text-gray-700 truncate">{selectedFile?.name}</span>
+                  {blobUrl && <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Uploaded</span>}
                 </div>
                 <Button
                   variant="outline"
@@ -845,7 +862,6 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
                 </Button>
               </div>
 
-              {/* PDF Canvas */}
               <div className="flex-1 overflow-auto bg-gray-100 p-4" style={{ maxHeight: "600px" }}>
                 <div className="flex justify-center min-h-full">
                   {!pdfLoaded && !pdfRenderPending && (
@@ -876,7 +892,6 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
                 </div>
               </div>
 
-              {/* Page Navigation and Zoom Controls */}
               {documentPreview === "PDF_DOCUMENT" && (
                 <div className="flex items-center justify-between p-3 bg-gray-50 border-t">
                   <div className="flex items-center gap-2">
@@ -944,6 +959,7 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
         <div className="mt-4 text-xs text-gray-500">
           <p>✅ Document uploaded successfully</p>
           <p>📊 Data extraction {processingStatus === "success" ? "completed" : "in progress"}</p>
+          {blobUrl && <p>☁️ Stored in cloud storage</p>}
           {documentPreview === "PDF_DOCUMENT" && <p>🔍 Use zoom controls to adjust view</p>}
         </div>
       </div>
@@ -1373,6 +1389,14 @@ export function EnhancedNewLoadModal({ isOpen, onClose, onSubmit }: EnhancedNewL
                             <p className="text-sm text-muted-foreground">
                               Drag & drop or click to select PDF/image files
                             </p>
+                          </>
+                        )}
+
+                        {processingStatus === "uploading" && (
+                          <>
+                            <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
+                            <h3 className="text-lg font-semibold">Uploading to Cloud</h3>
+                            <p className="text-sm text-muted-foreground">{statusMessage}</p>
                           </>
                         )}
 

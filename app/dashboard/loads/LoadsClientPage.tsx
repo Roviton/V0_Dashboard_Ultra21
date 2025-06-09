@@ -1,138 +1,108 @@
 "use client"
 
-import { useState, useMemo } from "react"
-import { LoadsHistoryTable } from "@/components/dashboard/loads/loads-history-table"
+import { useState } from "react"
+import useLoads from "@/hooks/use-loads" // Corrected: Default import
+import { LoadsDataTable } from "@/components/dashboard/loads-data-table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { useLoads } from "@/hooks/use-loads"
-import { LoadDetailsDialog } from "@/components/dashboard/modals/load-details-dialog"
-import { DateRangePicker } from "@/components/ui/date-range-picker"
+import { DateRangePicker } from "@/components/ui/date-range-picker" // Assuming this exists
+import { useModal } from "@/hooks/use-modal"
 import type { DateRange } from "react-day-picker"
-import { subDays } from "date-fns"
-import { Loader2, Search } from "lucide-react"
 
 export default function LoadsClientPage() {
-  const { loads: allHistoryLoads, loading, error, refetch } = useLoads({ viewMode: "history" })
-  const [selectedLoad, setSelectedLoad] = useState<any | null>(null)
-  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false)
-
   const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState<string>("all")
-  const [dateRange, setDateRange] = useState<DateRange | undefined>({
-    from: subDays(new Date(), 90), // Default to last 90 days
-    to: new Date(),
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined)
+
+  // Pass filter options to useLoads hook
+  const {
+    loads,
+    loading,
+    error,
+    createLoad, // Assuming useLoads exports this
+    updateLoadStatus, // Assuming useLoads exports this
+    assignDriver, // Assuming useLoads exports this
+    refetch: refetchLoads, // Assuming useLoads exports this
+  } = useLoads({
+    viewMode: statusFilter === "all" ? "all" : statusFilter === "active" ? "active" : "history",
+    // Add other filters like searchTerm, dateRange if useLoads supports them
   })
 
-  const handleViewDetails = (load: any) => {
-    setSelectedLoad(load)
-    setIsDetailsModalOpen(true)
+  const { onOpen } = useModal()
+
+  const handleCreateNewLoad = () => {
+    onOpen("enhancedNewLoad", {
+      // Pass any necessary props to the modal, e.g., a callback to refresh loads
+      onLoadCreated: () => {
+        if (refetchLoads) refetchLoads()
+      },
+    })
   }
 
-  const filteredLoads = useMemo(() => {
-    let filtered = allHistoryLoads
-
-    // Filter by search term (Load # or Customer Name)
-    if (searchTerm) {
-      filtered = filtered.filter(
-        (load) =>
-          load.load_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          load.customer?.name?.toLowerCase().includes(searchTerm.toLowerCase()),
-      )
+  // Placeholder for actual update/assign functions if not directly from useLoads
+  const handleUpdateStatus = async (loadId: string, newStatus: string) => {
+    if (updateLoadStatus) {
+      await updateLoadStatus(loadId, newStatus)
+      // refetchLoads might be called automatically by the hook, or call it here
+    } else {
+      console.warn("updateLoadStatus function not available from useLoads hook")
     }
-
-    // Filter by status
-    if (statusFilter !== "all") {
-      filtered = filtered.filter((load) => load.status === statusFilter)
-    }
-
-    // Filter by date range (using 'completed_at' or 'updated_at' as fallback)
-    if (dateRange?.from && dateRange?.to) {
-      filtered = filtered.filter((load) => {
-        const loadDate = load.completed_at || load.updated_at || load.created_at
-        if (!loadDate) return false
-        const date = new Date(loadDate)
-        return date >= (dateRange.from as Date) && date <= (dateRange.to as Date)
-      })
-    }
-    return filtered
-  }, [allHistoryLoads, searchTerm, statusFilter, dateRange])
-
-  if (loading) {
-    return (
-      <div className="flex h-[50vh] items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="ml-2">Loading historical loads...</p>
-      </div>
-    )
   }
 
-  if (error) {
-    return (
-      <div className="rounded-md border border-destructive bg-destructive/10 p-4 text-destructive">
-        <h3 className="font-semibold">Error loading data</h3>
-        <p>{error}</p>
-        <Button onClick={refetch} variant="outline" className="mt-2">
-          Try Again
-        </Button>
-      </div>
-    )
+  const handleAssignDriver = (loadId: string, driverId: string) => {
+    // This would typically open the assign driver modal,
+    // and the modal itself would call the assignDriver function from the hook.
+    // For now, let's assume the modal handles it.
+    // If assignDriver is directly called here:
+    // if (assignDriver) {
+    //   await assignDriver(loadId, driverId);
+    // } else {
+    //   console.warn("assignDriver function not available from useLoads hook");
+    // }
+    console.log(`Assign driver for load ${loadId} (driver ${driverId}) - typically handled by modal`)
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Loads History</h1>
-        <p className="text-muted-foreground">View and manage completed, cancelled, and other archived loads.</p>
+    <div className="container mx-auto py-6 space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+        <h1 className="text-2xl font-semibold">Loads Management</h1>
+        <Button onClick={handleCreateNewLoad}>Create New Load</Button>
       </div>
 
-      <div className="rounded-lg border bg-card p-6">
-        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder="Search by Load # or Customer..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-8 w-full"
-            />
-          </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Filter by status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Archived Statuses</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-              <SelectItem value="cancelled">Cancelled</SelectItem>
-              <SelectItem value="refused">Refused</SelectItem>
-              <SelectItem value="other_archived">Other Archived</SelectItem>
-            </SelectContent>
-          </Select>
-          <div>
-            <DateRangePicker
-              range={dateRange}
-              onRangeChange={setDateRange}
-              className="w-full"
-              placeholder="Filter by date range"
-            />
-          </div>
-        </div>
-        {/* The Apply Filters button might not be strictly necessary if filters apply live,
-       but can be kept if preferred for explicit action. For now, assuming live filtering. */}
-      </div>
-
-      <LoadsHistoryTable loads={filteredLoads} onViewDetails={handleViewDetails} />
-
-      {selectedLoad && (
-        <LoadDetailsDialog
-          isOpen={isDetailsModalOpen}
-          onClose={() => setIsDetailsModalOpen(false)}
-          load={selectedLoad}
-          // We might need a prop here like `showPdfFeatures={false}` if the dialog has PDF actions
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 border rounded-lg bg-card">
+        <Input
+          placeholder="Search loads (ID, Ref, City...)"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="md:col-span-1"
         />
-      )}
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="md:col-span-1">
+            <SelectValue placeholder="Filter by status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            <SelectItem value="active">Active Loads</SelectItem>
+            <SelectItem value="history">Load History</SelectItem>
+            <SelectItem value="new">New</SelectItem>
+            <SelectItem value="assigned">Assigned</SelectItem>
+            <SelectItem value="accepted">Accepted</SelectItem>
+            <SelectItem value="in_progress">In Progress</SelectItem>
+            <SelectItem value="completed">Completed</SelectItem>
+            <SelectItem value="cancelled">Cancelled</SelectItem>
+          </SelectContent>
+        </Select>
+        <DateRangePicker date={dateRange} onDateChange={setDateRange} className="md:col-span-1" />
+      </div>
+
+      <LoadsDataTable
+        loads={loads} // Pass filtered loads here eventually
+        loading={loading}
+        error={error}
+        onUpdateStatus={handleUpdateStatus}
+        // onAssignDriver is handled by the modal system via dropdown menu
+      />
     </div>
   )
 }
