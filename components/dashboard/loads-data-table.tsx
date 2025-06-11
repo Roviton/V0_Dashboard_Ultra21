@@ -16,26 +16,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useModal } from "@/hooks/use-modal"
 import { cn } from "@/lib/utils"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  ChevronRightIcon,
-  ChevronDownIcon,
-  FileText,
-  ZoomIn,
-  ZoomOut,
-  Download,
-  Loader2,
-  AlertCircle,
-  MoreHorizontal,
-  Eye,
-  User,
-  CheckCircle,
-  XCircle,
-  ArrowUpDown,
-  Package,
-  Building,
-  Truck,
-  MapPin,
-} from "lucide-react"
+import { ChevronRightIcon, ChevronDownIcon, FileText, ZoomIn, ZoomOut, Download, Loader2, AlertCircle, MoreHorizontal, Eye, User, CheckCircle, XCircle, ArrowUpDown, Package, Building, Truck, MapPin } from 'lucide-react'
 import { Separator } from "@/components/ui/separator"
 import { useToast } from "@/hooks/use-toast"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -90,7 +71,7 @@ interface LoadsDataTableProps {
   loading?: boolean
   error?: string | null
   onUpdateStatus?: (loadId: string, status: string) => void
-  onAssignDriver?: (loadId: string, driverId: string) => void // Assuming this is handled by modal
+  onAssignDriver?: (loadId: string, driverId: string) => void
   isDashboard?: boolean
 }
 
@@ -107,7 +88,7 @@ export function LoadsDataTable({
   loading = false,
   error = null,
   onUpdateStatus,
-  // onAssignDriver, // This will be handled by the modal
+  onAssignDriver,
   isDashboard = false,
 }: LoadsDataTableProps) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
@@ -741,7 +722,10 @@ export function LoadsDataTable({
                 <Eye className="mr-2 h-4 w-4" /> View Details
               </DropdownMenuItem>
               {isActiveLoad(load.status) && (
-                <DropdownMenuItem onClick={() => onOpen("assignDriver", { data: load })}>
+                <DropdownMenuItem onClick={() => onOpen("assignDriver", { 
+                  data: load,
+                  onAssign: onAssignDriver 
+                })}>
                   <User className="mr-2 h-4 w-4" /> Assign Driver
                 </DropdownMenuItem>
               )}

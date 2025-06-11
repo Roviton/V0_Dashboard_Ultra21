@@ -113,3 +113,115 @@ export async function createLoad(input: CreateLoadInput) {
     throw error
   }
 }
+
+export interface Load {
+  id: string
+  load_number: string
+  customer_id: string
+  pickup_location?: string
+  delivery_location?: string
+  pickup_datetime?: string
+  delivery_datetime?: string
+  status: string
+  rate?: number
+  miles?: number
+  weight?: number
+  commodity?: string
+  equipment_type?: string
+  special_instructions_pickup?: string
+  special_instructions_delivery?: string
+  special_instructions_general?: string
+  broker_email?: string
+  broker_phone?: string
+  dispatcher_id?: string
+  vin_number?: string
+  company_id: string
+  created_at: string
+  updated_at?: string
+  customers?: {
+    name: string
+  }
+  drivers?: {
+    first_name: string
+    last_name: string
+  }
+}
+
+export interface Driver {
+  id: string
+  first_name: string
+  last_name: string
+  email?: string
+  phone?: string
+  license_number?: string
+  company_id: string
+}
+
+export async function getLoads(): Promise<Load[]> {
+  try {
+    const { data, error } = await supabase
+      .from("loads")
+      .select(`
+        *,
+        customers (name),
+        drivers (first_name, last_name)
+      `)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Error fetching loads:", error)
+      throw new Error(`Failed to fetch loads: ${error.message}`)
+    }
+
+    return data || []
+  } catch (error: any) {
+    console.error("Error in getLoads:", error)
+    throw error
+  }
+}
+
+export async function getDrivers(): Promise<Driver[]> {
+  try {
+    const { data, error } = await supabase.from("drivers").select("*").order("first_name", { ascending: true })
+
+    if (error) {
+      console.error("Error fetching drivers:", error)
+      throw new Error(`Failed to fetch drivers: ${error.message}`)
+    }
+
+    return data || []
+  } catch (error: any) {
+    console.error("Error in getDrivers:", error)
+    throw error
+  }
+}
+
+export async function assignDriverToLoad({ loadId, driverId }: { loadId: string; driverId: string }) {
+  try {
+    console.log("🚀 Assigning driver to load:", { loadId, driverId })
+
+    // Update the load with the assigned driver
+    const { data, error } = await supabase
+      .from("loads")
+      .update({
+        driver_id: driverId,
+        status: "assigned",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", loadId)
+      .select()
+      .single()
+
+    if (error) {
+      console.error("❌ Error assigning driver to load:", error)
+      throw new Error(`Failed to assign driver: ${error.message}`)
+    }
+
+    console.log("✅ Driver assigned successfully:", data)
+    revalidatePath("/dashboard/loads")
+    return data
+  } catch (error: any) {
+    console.error("❌ Error in assignDriverToLoad:", error)
+    throw error
+  }
+}

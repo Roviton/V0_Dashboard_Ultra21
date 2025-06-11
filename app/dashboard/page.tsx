@@ -14,17 +14,19 @@ import { useEffect } from "react"
 import { ModalProvider } from "@/components/modal-provider"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { useModal } from "@/hooks/use-modal-store" // Use the correct modal hook
+import { useModal } from "@/hooks/use-modal"
 import { Plus } from "lucide-react"
 
 export default function DashboardPage() {
   const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState<"active" | "history" | "all">("active")
+  const [statusFilter, setStatusFilter] = useState("active")
 
   const {
     loads,
     loading,
     error,
+    updateLoadStatus,
+    assignDriver,
     refetch: refetchLoads,
   } = useLoads({
     viewMode: statusFilter,
@@ -34,10 +36,9 @@ export default function DashboardPage() {
   const router = useRouter()
   const pathname = usePathname()
   const { toast } = useToast()
-  const { onOpen } = useModal() // Use the working modal store
+  const { onOpen } = useModal()
 
   useEffect(() => {
-    // Redirect admin users to the admin dashboard
     if (!authLoading) {
       if (user?.role === "admin") {
         if (pathname !== "/dashboard/admin") {
@@ -48,12 +49,12 @@ export default function DashboardPage() {
   }, [user, authLoading, router, pathname])
 
   const handleCreateNewLoad = () => {
-    console.log("🔍 Dashboard: Create button clicked")
-    console.log("🔍 Dashboard: User:", user)
-    console.log("🔍 Dashboard: User companyId:", user?.companyId)
+    console.log("Dashboard: Create button clicked")
+    console.log("Dashboard: User:", user)
+    console.log("Dashboard: User companyId:", user?.companyId)
 
     if (!user) {
-      console.log("❌ Dashboard: No user found")
+      console.log("Dashboard: No user found")
       toast({
         title: "Authentication Error",
         description: "User not authenticated. Please log in again.",
@@ -63,7 +64,7 @@ export default function DashboardPage() {
     }
 
     if (!user.companyId) {
-      console.log("❌ Dashboard: No companyId found")
+      console.log("Dashboard: No companyId found")
       toast({
         title: "Authentication Error",
         description: "User company information is missing. Cannot create load.",
@@ -72,8 +73,26 @@ export default function DashboardPage() {
       return
     }
 
-    console.log("✅ Dashboard: All checks passed, opening modal")
+    console.log("Dashboard: All checks passed, opening modal")
     onOpen("enhancedNewLoad", {})
+  }
+
+  const handleAssignDriver = async (loadId, driverId) => {
+    try {
+      await assignDriver(loadId, driverId)
+      toast({
+        title: "Success",
+        description: "Driver assigned successfully",
+      })
+      if (refetchLoads) refetchLoads()
+    } catch (error) {
+      console.error("Error assigning driver:", error)
+      toast({
+        title: "Error",
+        description: "Failed to assign driver",
+        variant: "destructive",
+      })
+    }
   }
 
   const filteredLoads = loads.filter((load) => {
@@ -143,10 +162,7 @@ export default function DashboardPage() {
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="lg:col-span-1"
                 />
-                <Select
-                  value={statusFilter}
-                  onValueChange={(value) => setStatusFilter(value as "active" | "history" | "all")}
-                >
+                <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value)}>
                   <SelectTrigger className="lg:col-span-1">
                     <SelectValue placeholder="Filter by status" />
                   </SelectTrigger>
@@ -171,7 +187,8 @@ export default function DashboardPage() {
                 loads={filteredLoads}
                 loading={loading && loads.length === 0}
                 error={error}
-                onUpdateStatus={() => {}}
+                onUpdateStatus={updateLoadStatus}
+                onAssignDriver={handleAssignDriver}
               />
             )}
           </CardContent>

@@ -116,6 +116,66 @@ export async function testAPIKeys() {
 }
 
 /**
+ * Enhanced JSON extraction with multiple fallback strategies
+ */
+function extractJSONFromResponse(text: string): any {
+  console.log("Raw AI response:", text.substring(0, 500) + "...")
+
+  // Strategy 1: Try to find JSON between code blocks
+  const codeBlockMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/i)
+  if (codeBlockMatch) {
+    try {
+      console.log("Found JSON in code block")
+      return JSON.parse(codeBlockMatch[1])
+    } catch (error) {
+      console.log("Failed to parse JSON from code block:", error)
+    }
+  }
+
+  // Strategy 2: Find the largest JSON object in the response
+  const jsonMatches = text.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g)
+  if (jsonMatches) {
+    // Sort by length and try the largest first
+    const sortedMatches = jsonMatches.sort((a, b) => b.length - a.length)
+
+    for (const match of sortedMatches) {
+      try {
+        console.log("Trying JSON match:", match.substring(0, 100) + "...")
+        return JSON.parse(match)
+      } catch (error) {
+        console.log("Failed to parse JSON match:", error)
+        continue
+      }
+    }
+  }
+
+  // Strategy 3: Try to extract JSON from the entire response
+  try {
+    console.log("Trying to parse entire response as JSON")
+    return JSON.parse(text)
+  } catch (error) {
+    console.log("Failed to parse entire response as JSON:", error)
+  }
+
+  // Strategy 4: Try to clean and extract JSON
+  const cleanedText = text
+    .replace(/^[^{]*/, "") // Remove everything before first {
+    .replace(/[^}]*$/, "") // Remove everything after last }
+    .trim()
+
+  if (cleanedText.startsWith("{") && cleanedText.endsWith("}")) {
+    try {
+      console.log("Trying cleaned JSON")
+      return JSON.parse(cleanedText)
+    } catch (error) {
+      console.log("Failed to parse cleaned JSON:", error)
+    }
+  }
+
+  throw new Error("Could not extract valid JSON from AI response")
+}
+
+/**
  * Enhanced OCR extraction - supports both images and PDFs
  */
 export async function extractBillOfLadingData(dataUrl: string) {
@@ -169,7 +229,7 @@ Extract ALL relevant information and return it as a JSON object with this exact 
   "specialInstructions": "string or null"
 }
 
-IMPORTANT: Use null for any fields you cannot find. Do not use empty strings or undefined. Return ONLY the JSON object, no other text.`
+CRITICAL: Return ONLY the JSON object, no other text, explanations, or formatting. Use null for any fields you cannot find.`
 
     // Check API key availability first
     const openaiKey = process.env.OPENAI_API_KEY
@@ -197,7 +257,7 @@ IMPORTANT: Use null for any fields you cannot find. Do not use empty strings or 
               content: [
                 {
                   type: "text",
-                  text: "Extract all freight information from this PDF document. Pay special attention to distinguishing between carrier, broker, pickup location, and delivery location. Use null for any fields you cannot find.",
+                  text: "Extract all freight information from this PDF document. Pay special attention to distinguishing between carrier, broker, pickup location, and delivery location. Return only valid JSON with null for missing fields.",
                 },
                 {
                   type: "file",
@@ -211,21 +271,18 @@ IMPORTANT: Use null for any fields you cannot find. Do not use empty strings or 
           temperature: 0.1,
         })
 
-        console.log("OpenAI PDF response received:", result.text.substring(0, 200) + "...")
+        console.log("OpenAI PDF response received")
 
         if (result.text) {
-          const jsonMatch = result.text.match(/\{[\s\S]*\}/)
-          if (jsonMatch) {
-            const data = JSON.parse(jsonMatch[0])
-            const cleanedData = cleanExtractedData(data)
-            const validatedData = billOfLadingSchema.parse(cleanedData)
+          const data = extractJSONFromResponse(result.text)
+          const cleanedData = cleanExtractedData(data)
+          const validatedData = billOfLadingSchema.parse(cleanedData)
 
-            return {
-              success: true,
-              data: validatedData,
-              processingMethod: "openai-pdf",
-              model: "gpt-4o",
-            }
+          return {
+            success: true,
+            data: validatedData,
+            processingMethod: "openai-pdf",
+            model: "gpt-4o",
           }
         }
       } catch (pdfError) {
@@ -260,7 +317,7 @@ IMPORTANT: Use null for any fields you cannot find. Do not use empty strings or 
                 content: [
                   {
                     type: "text",
-                    text: "Extract all freight information from this document image. Pay special attention to distinguishing between carrier, broker, pickup location, and delivery location. Use null for any fields you cannot find.",
+                    text: "Extract all freight information from this document image. Pay special attention to distinguishing between carrier, broker, pickup location, and delivery location. Return only valid JSON with null for missing fields.",
                   },
                   {
                     type: "image",
@@ -273,21 +330,18 @@ IMPORTANT: Use null for any fields you cannot find. Do not use empty strings or 
             temperature: 0.1,
           })
 
-          console.log("Claude response received:", result.text.substring(0, 200) + "...")
+          console.log("Claude response received")
 
           if (result.text) {
-            const jsonMatch = result.text.match(/\{[\s\S]*\}/)
-            if (jsonMatch) {
-              const data = JSON.parse(jsonMatch[0])
-              const cleanedData = cleanExtractedData(data)
-              const validatedData = billOfLadingSchema.parse(cleanedData)
+            const data = extractJSONFromResponse(result.text)
+            const cleanedData = cleanExtractedData(data)
+            const validatedData = billOfLadingSchema.parse(cleanedData)
 
-              return {
-                success: true,
-                data: validatedData,
-                processingMethod: "claude-vision",
-                model: "claude-3.5-sonnet",
-              }
+            return {
+              success: true,
+              data: validatedData,
+              processingMethod: "claude-vision",
+              model: "claude-3.5-sonnet",
             }
           }
         } catch (claudeError) {
@@ -310,7 +364,7 @@ IMPORTANT: Use null for any fields you cannot find. Do not use empty strings or 
               content: [
                 {
                   type: "text",
-                  text: "Extract all freight information from this document image. Pay special attention to distinguishing between carrier, broker, pickup location, and delivery location. Use null for any fields you cannot find.",
+                  text: "Extract all freight information from this document image. Pay special attention to distinguishing between carrier, broker, pickup location, and delivery location. Return only valid JSON with null for missing fields.",
                 },
                 {
                   type: "image",
@@ -323,22 +377,19 @@ IMPORTANT: Use null for any fields you cannot find. Do not use empty strings or 
           temperature: 0.1,
         })
 
-        console.log("OpenAI response received:", result.text.substring(0, 200) + "...")
+        console.log("OpenAI response received")
 
         if (result.text) {
-          const jsonMatch = result.text.match(/\{[\s\S]*\}/)
-          if (jsonMatch) {
-            const data = JSON.parse(jsonMatch[0])
-            const cleanedData = cleanExtractedData(data)
-            const validatedData = billOfLadingSchema.parse(cleanedData)
+          const data = extractJSONFromResponse(result.text)
+          const cleanedData = cleanExtractedData(data)
+          const validatedData = billOfLadingSchema.parse(cleanedData)
 
-            return {
-              success: true,
-              data: validatedData,
-              processingMethod: "openai-vision",
-              model: "gpt-4o",
-              usedFallback: true,
-            }
+          return {
+            success: true,
+            data: validatedData,
+            processingMethod: "openai-vision",
+            model: "gpt-4o",
+            usedFallback: true,
           }
         }
       }

@@ -17,7 +17,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase-client"
-import { Loader2 } from "lucide-react"
+import { Loader2, AlertTriangle } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 // Define the driver interface
 interface Driver {
@@ -64,39 +65,56 @@ export function AssignDriverModal({ isOpen, onClose, load, onAssign }: AssignDri
   const [drivers, setDrivers] = useState<Driver[]>([])
   const [loading, setLoading] = useState(false)
   const [assigning, setAssigning] = useState(false)
+  const [currentAssignment, setCurrentAssignment] = useState<any>(null)
   const { toast } = useToast()
 
-  // Fetch drivers from the database
+  // Fetch drivers and current assignment from the database
   useEffect(() => {
-    const fetchDrivers = async () => {
+    const fetchData = async () => {
       if (!isOpen) return
 
       setLoading(true)
       try {
-        console.log("Fetching drivers from database...")
+        console.log("Fetching drivers and current assignment...")
 
-        const { data, error } = await supabase.from("drivers").select("*").order("name")
+        // Fetch available drivers
+        const { data: driversData, error: driversError } = await supabase
+          .from("drivers")
+          .select("*")
+          .eq("is_active", true)
+          .order("name")
 
-        if (error) {
-          console.error("Error fetching drivers:", error)
-          throw error
+        if (driversError) {
+          console.error("Error fetching drivers:", driversError)
+          throw driversError
         }
 
-        console.log("Fetched drivers:", data)
+        // Fetch current driver assignment for this load
+        const { data: assignmentData, error: assignmentError } = await supabase
+          .from("load_drivers")
+          .select(`
+            *,
+            driver:drivers(*)
+          `)
+          .eq("load_id", load.id)
+          .eq("is_primary", true)
+          .maybeSingle()
 
-        if (data && data.length > 0) {
-          // Use real drivers from database
+        if (assignmentError && assignmentError.code !== "PGRST116") {
+          // PGRST116 is "no rows returned"
+          console.error("Error fetching current assignment:", assignmentError)
+          throw assignmentError
+        }
+
+        console.log("Fetched data:", { drivers: driversData, assignment: assignmentData })
+
+        if (driversData && driversData.length > 0) {
           setDrivers(
-            data.map((driver) => ({
+            driversData.map((driver) => ({
               id: driver.id,
               name: driver.name,
-              avatar: driver.avatar || "/placeholder.svg",
-              status:
-                driver.status === "available"
-                  ? "Available"
-                  : driver.status === "on_delivery"
-                    ? "On Delivery"
-                    : driver.status || "Unknown",
+              avatar: driver.avatar_url || "/placeholder.svg",
+              status: driver.status === "available" ? "Available" : driver.status || "Unknown",
               location: driver.location || "Unknown",
               lastDelivery: driver.last_delivery || "N/A",
               rating: driver.rating || 4.5,
@@ -107,27 +125,29 @@ export function AssignDriverModal({ isOpen, onClose, load, onAssign }: AssignDri
         } else {
           console.log("No drivers found in database")
           setDrivers([])
-          toast({
-            title: "No drivers available",
-            description: "Please add drivers to the system first.",
-            variant: "destructive",
-          })
+        }
+
+        // Set current assignment if exists
+        setCurrentAssignment(assignmentData)
+        if (assignmentData?.driver) {
+          setSelectedDriver(assignmentData.driver.id)
         }
       } catch (error) {
-        console.error("Error in fetchDrivers:", error)
+        console.error("Error in fetchData:", error)
         toast({
-          title: "Error loading drivers",
-          description: "Failed to load drivers. Please try again.",
+          title: "Error loading data",
+          description: "Failed to load drivers and assignment information. Please try again.",
           variant: "destructive",
         })
         setDrivers([])
+        setCurrentAssignment(null)
       } finally {
         setLoading(false)
       }
     }
 
     if (isOpen) {
-      fetchDrivers()
+      fetchData()
 
       // Generate default message
       const pickupDate = load.pickup_date ? new Date(load.pickup_date).toLocaleDateString() : "N/A"
@@ -152,21 +172,26 @@ export function AssignDriverModal({ isOpen, onClose, load, onAssign }: AssignDri
       return
     }
 
+    // Check if this is the same driver already assigned
+    if (currentAssignment?.driver?.id === selectedDriver) {
+      toast({
+        title: "No Change",
+        description: "This driver is already assigned to this load",
+      })
+      return
+    }
+
     setAssigning(true)
     try {
       console.log("Assigning driver:", { loadId: load.id, driverId: selectedDriver })
 
-      // Call the onAssign callback
+      // Call the onAssign callback if provided
       if (onAssign) {
         await onAssign(load.id, selectedDriver)
       } else {
+        // Fallback: direct database call (this should be avoided in favor of the hook)
         throw new Error("Assignment function not provided")
       }
-
-      toast({
-        title: "Driver assigned successfully",
-        description: `Driver has been assigned to load ${load.load_number || load.id}`,
-      })
 
       // Reset form and close modal
       setSelectedDriver("")
@@ -174,41 +199,41 @@ export function AssignDriverModal({ isOpen, onClose, load, onAssign }: AssignDri
       onClose()
     } catch (error) {
       console.error("Error assigning driver:", error)
-
-      // Handle specific error cases
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
-      let userMessage = "Failed to assign driver. Please try again."
-
-      if (errorMessage.includes("not found")) {
-        userMessage = "The selected driver or load no longer exists. Please refresh and try again."
-      } else if (errorMessage.includes("already assigned")) {
-        userMessage = "This driver is already assigned to this load."
-      }
-
-      toast({
-        title: "Assignment failed",
-        description: userMessage,
-        variant: "destructive",
-      })
+      // Error handling is done in the assignDriver function
     } finally {
       setAssigning(false)
     }
   }
 
   const selectedDriverInfo = drivers.find((d) => d.id === selectedDriver)
+  const isReassignment = currentAssignment && currentAssignment.driver
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>Assign Driver to Load {load.load_number || load.id}</DialogTitle>
+          <DialogTitle>
+            {isReassignment ? "Reassign Driver" : "Assign Driver"} to Load {load.load_number || load.id}
+          </DialogTitle>
           <DialogDescription>
-            Select a driver to assign to this load from {load.pickup_city || "origin"} to{" "}
-            {load.delivery_city || "destination"}.
+            {isReassignment
+              ? `Currently assigned to ${currentAssignment.driver.name}. Select a new driver to reassign this load.`
+              : `Select a driver to assign to this load from ${load.pickup_city || "origin"} to ${load.delivery_city || "destination"}.`}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-6 py-4">
+          {/* Current Assignment Alert */}
+          {isReassignment && (
+            <Alert>
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                This load is currently assigned to <strong>{currentAssignment.driver.name}</strong>. Selecting a new
+                driver will reassign the load.
+              </AlertDescription>
+            </Alert>
+          )}
+
           <div className="space-y-2">
             <h3 className="text-sm font-medium">Load Details</h3>
             <div className="grid grid-cols-2 gap-2 text-sm">
@@ -346,10 +371,10 @@ export function AssignDriverModal({ isOpen, onClose, load, onAssign }: AssignDri
             {assigning ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Assigning...
+                {isReassignment ? "Reassigning..." : "Assigning..."}
               </>
             ) : (
-              "Assign & Notify"
+              <>{isReassignment ? "Reassign Driver" : "Assign & Notify"}</>
             )}
           </Button>
         </DialogFooter>

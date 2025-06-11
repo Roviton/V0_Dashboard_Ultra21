@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState, useRef, useEffect } from "react"
-import { useModal } from "@/hooks/use-modal-store"
+import { useModal } from "@/hooks/use-modal"
 import { useAuth } from "@/contexts/auth-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -49,6 +49,8 @@ type ExtractionStep = {
   status: "pending" | "processing" | "completed" | "error"
   icon: React.ReactNode
 }
+
+type EnhancedNewLoadModalProps = {}
 
 export const EnhancedNewLoadModal = () => {
   const { isOpen, type, data, onClose } = useModal()
