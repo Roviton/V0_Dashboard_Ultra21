@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   type ColumnDef,
   type ColumnFiltersState,
@@ -13,7 +13,18 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { ArrowUpDown, Check, ChevronDown, Filter, MessageCircle, MoreHorizontal, Phone, X } from "lucide-react"
+import {
+  ArrowUpDown,
+  Check,
+  ChevronDown,
+  Filter,
+  MessageCircle,
+  MoreHorizontal,
+  Phone,
+  X,
+  Eye,
+  Trash2,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -28,266 +39,75 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Switch } from "@/components/ui/switch"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-import { cn } from "@/lib/utils"
+import { getDrivers, updateDriverStatus, updateDriverMessaging, deleteDriver } from "@/actions/driver-actions"
+import { DriverProfileModal } from "./driver-profile-modal"
 
-// Define the Driver type
+// Define the Driver type based on our database schema
 export type Driver = {
   id: string
   name: string
-  avatar: string
-  phone: string
-  email: string
-  location: string
-  status: "AVAILABLE" | "ON_DUTY" | "OFF_DUTY" | "ON_BREAK"
-  licenseType: string
-  experience: number // years
-  joinDate: string
-  performance: {
-    totalMiles: number
-    totalRevenue: number
-    totalLoads: number
-    averageRPM: number
-    onTimeDelivery: number // percentage
-    loadAcceptanceRate: number // percentage
-  }
-  messaging: {
-    telegram: boolean
-    whatsapp: boolean
-    sms: boolean
-  }
+  email?: string
+  phone?: string
+  date_of_birth?: string
+  address_line_1?: string
+  city?: string
+  state?: string
+  status: "available" | "on_duty" | "off_duty" | "on_break"
+  driver_type: string
+  license_number?: string
+  equipment_preferences?: string[]
+  truck_number?: string
+  trailer_number?: string
+  hire_date?: string
   notes?: string
+  avatar_url?: string
+  driver_performance?: Array<{
+    total_miles: number
+    total_revenue: number
+    total_loads: number
+    on_time_delivery_rate: number
+    load_acceptance_rate: number
+    average_rpm: number
+  }>
+  driver_messaging?: Array<{
+    telegram_enabled: boolean
+    whatsapp_enabled: boolean
+    sms_enabled: boolean
+    email_enabled: boolean
+  }>
+  driver_documents?: Array<{
+    id: string
+    document_type: string
+    expiration_date?: string
+    status: string
+  }>
 }
-
-// Sample data
-const initialData: Driver[] = [
-  {
-    id: "D-1001",
-    name: "John Smith",
-    avatar: "/javascript-code.png",
-    phone: "(555) 123-4567",
-    email: "john.smith@example.com",
-    location: "Los Angeles, CA",
-    status: "AVAILABLE",
-    licenseType: "Class A CDL",
-    experience: 5,
-    joinDate: "2022-03-15",
-    performance: {
-      totalMiles: 24500,
-      totalRevenue: 78400,
-      totalLoads: 42,
-      averageRPM: 3.2,
-      onTimeDelivery: 98,
-      loadAcceptanceRate: 95,
-    },
-    messaging: {
-      telegram: true,
-      whatsapp: true,
-      sms: true,
-    },
-    notes: "Prefers longer hauls. Available for weekend work with advance notice.",
-  },
-  {
-    id: "D-1002",
-    name: "Sarah Johnson",
-    avatar: "/stylized-letters-sj.png",
-    phone: "(555) 234-5678",
-    email: "sarah.johnson@example.com",
-    location: "Phoenix, AZ",
-    status: "ON_DUTY",
-    licenseType: "Class A CDL",
-    experience: 3,
-    joinDate: "2023-01-10",
-    performance: {
-      totalMiles: 18700,
-      totalRevenue: 62300,
-      totalLoads: 35,
-      averageRPM: 3.33,
-      onTimeDelivery: 100,
-      loadAcceptanceRate: 92,
-    },
-    messaging: {
-      telegram: true,
-      whatsapp: false,
-      sms: true,
-    },
-    notes: "Very reliable. Prefers routes in the Southwest region.",
-  },
-  {
-    id: "D-1003",
-    name: "Mike Williams",
-    avatar: "/intertwined-letters.png",
-    phone: "(555) 345-6789",
-    email: "mike.williams@example.com",
-    location: "San Diego, CA",
-    status: "ON_DUTY",
-    licenseType: "Class A CDL",
-    experience: 7,
-    joinDate: "2021-06-22",
-    performance: {
-      totalMiles: 31200,
-      totalRevenue: 93600,
-      totalLoads: 56,
-      averageRPM: 3.0,
-      onTimeDelivery: 95,
-      loadAcceptanceRate: 98,
-    },
-    messaging: {
-      telegram: false,
-      whatsapp: true,
-      sms: true,
-    },
-    notes: "Excellent with difficult deliveries. Has requested time off next month (June 15-22).",
-  },
-  {
-    id: "D-1004",
-    name: "Tom Davis",
-    avatar: "/abstract-geometric-TD.png",
-    phone: "(555) 456-7890",
-    email: "tom.davis@example.com",
-    location: "Las Vegas, NV",
-    status: "OFF_DUTY",
-    licenseType: "Class A CDL",
-    experience: 2,
-    joinDate: "2023-08-05",
-    performance: {
-      totalMiles: 12800,
-      totalRevenue: 38400,
-      totalLoads: 24,
-      averageRPM: 3.0,
-      onTimeDelivery: 92,
-      loadAcceptanceRate: 90,
-    },
-    messaging: {
-      telegram: false,
-      whatsapp: false,
-      sms: true,
-    },
-    notes: "New driver, still in training phase. Needs more experience with mountain routes.",
-  },
-  {
-    id: "D-1005",
-    name: "Lisa Brown",
-    avatar: "/stylized-letter-lb.png",
-    phone: "(555) 567-8901",
-    email: "lisa.brown@example.com",
-    location: "Denver, CO",
-    status: "AVAILABLE",
-    licenseType: "Class A CDL",
-    experience: 4,
-    joinDate: "2022-11-18",
-    performance: {
-      totalMiles: 19500,
-      totalRevenue: 68250,
-      totalLoads: 39,
-      averageRPM: 3.5,
-      onTimeDelivery: 97,
-      loadAcceptanceRate: 94,
-    },
-    messaging: {
-      telegram: true,
-      whatsapp: true,
-      sms: true,
-    },
-    notes: "Specializes in refrigerated loads. Very detail-oriented.",
-  },
-  {
-    id: "D-1006",
-    name: "Robert Chen",
-    avatar: "/remote-control-collection.png",
-    phone: "(555) 678-9012",
-    email: "robert.chen@example.com",
-    location: "Seattle, WA",
-    status: "ON_BREAK",
-    licenseType: "Class A CDL",
-    experience: 6,
-    joinDate: "2021-09-30",
-    performance: {
-      totalMiles: 28700,
-      totalRevenue: 86100,
-      totalLoads: 48,
-      averageRPM: 3.0,
-      onTimeDelivery: 96,
-      loadAcceptanceRate: 97,
-    },
-    messaging: {
-      telegram: true,
-      whatsapp: false,
-      sms: true,
-    },
-    notes: "Excellent communication skills. Prefers Pacific Northwest routes.",
-  },
-  {
-    id: "D-1007",
-    name: "Maria Garcia",
-    avatar: "/abstract-geometric-mg.png",
-    phone: "(555) 789-0123",
-    email: "maria.garcia@example.com",
-    location: "San Antonio, TX",
-    status: "AVAILABLE",
-    licenseType: "Class A CDL",
-    experience: 8,
-    joinDate: "2020-05-12",
-    performance: {
-      totalMiles: 35600,
-      totalRevenue: 106800,
-      totalLoads: 62,
-      averageRPM: 3.0,
-      onTimeDelivery: 99,
-      loadAcceptanceRate: 96,
-    },
-    messaging: {
-      telegram: false,
-      whatsapp: true,
-      sms: true,
-    },
-    notes: "Very experienced. Mentor for new drivers. Fluent in Spanish and English.",
-  },
-  {
-    id: "D-1008",
-    name: "David Wilson",
-    avatar: "/abstract-dw.png",
-    phone: "(555) 890-1234",
-    email: "david.wilson@example.com",
-    location: "Chicago, IL",
-    status: "OFF_DUTY",
-    licenseType: "Class A CDL",
-    experience: 3,
-    joinDate: "2023-02-28",
-    performance: {
-      totalMiles: 16800,
-      totalRevenue: 50400,
-      totalLoads: 30,
-      averageRPM: 3.0,
-      onTimeDelivery: 94,
-      loadAcceptanceRate: 91,
-    },
-    messaging: {
-      telegram: true,
-      whatsapp: true,
-      sms: false,
-    },
-    notes: "Often late to pickups. Needs improvement in time management.",
-  },
-]
 
 // Status badge component
 function StatusBadge({ status }: { status: Driver["status"] }) {
   const statusConfig = {
-    AVAILABLE: { variant: "outline" as const, label: "Available" },
-    ON_DUTY: { variant: "default" as const, label: "On Duty" },
-    OFF_DUTY: { variant: "secondary" as const, label: "Off Duty" },
-    ON_BREAK: { variant: "secondary" as const, label: "On Break" },
+    available: {
+      variant: "outline" as const,
+      label: "Available",
+      className: "border-green-500 text-green-700 bg-green-50",
+    },
+    on_duty: { variant: "default" as const, label: "On Duty", className: "bg-blue-500 text-white" },
+    off_duty: { variant: "secondary" as const, label: "Off Duty", className: "bg-gray-500 text-white" },
+    on_break: { variant: "secondary" as const, label: "On Break", className: "bg-yellow-500 text-white" },
   }
 
-  const config = statusConfig[status]
+  const config = statusConfig[status] || statusConfig.off_duty
 
-  return <Badge variant={config.variant}>{config.label}</Badge>
+  return (
+    <Badge variant={config.variant} className={config.className}>
+      {config.label}
+    </Badge>
+  )
 }
 
 // Messaging Integration component
@@ -296,8 +116,15 @@ function MessagingIntegration({
   onUpdate,
 }: {
   driver: Driver
-  onUpdate: (driverId: string, platform: keyof Driver["messaging"], value: boolean) => void
+  onUpdate: (driverId: string, platform: string, value: boolean) => void
 }) {
+  const messaging = driver.driver_messaging?.[0] || {
+    telegram_enabled: false,
+    whatsapp_enabled: false,
+    sms_enabled: true,
+    email_enabled: true,
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -321,7 +148,7 @@ function MessagingIntegration({
           <span className="text-sm font-medium">Telegram</span>
         </div>
         <div className="flex items-center gap-2">
-          {driver.messaging.telegram ? (
+          {messaging.telegram_enabled ? (
             <Badge variant="outline" className="bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400">
               <Check className="mr-1 h-3 w-3" />
               Connected
@@ -333,8 +160,8 @@ function MessagingIntegration({
             </Badge>
           )}
           <Switch
-            checked={driver.messaging.telegram}
-            onCheckedChange={(checked) => onUpdate(driver.id, "telegram", checked)}
+            checked={messaging.telegram_enabled}
+            onCheckedChange={(checked) => onUpdate(driver.id, "telegram_enabled", checked)}
           />
         </div>
       </div>
@@ -362,7 +189,7 @@ function MessagingIntegration({
           <span className="text-sm font-medium">WhatsApp</span>
         </div>
         <div className="flex items-center gap-2">
-          {driver.messaging.whatsapp ? (
+          {messaging.whatsapp_enabled ? (
             <Badge variant="outline" className="bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400">
               <Check className="mr-1 h-3 w-3" />
               Connected
@@ -374,8 +201,8 @@ function MessagingIntegration({
             </Badge>
           )}
           <Switch
-            checked={driver.messaging.whatsapp}
-            onCheckedChange={(checked) => onUpdate(driver.id, "whatsapp", checked)}
+            checked={messaging.whatsapp_enabled}
+            onCheckedChange={(checked) => onUpdate(driver.id, "whatsapp_enabled", checked)}
           />
         </div>
       </div>
@@ -399,7 +226,7 @@ function MessagingIntegration({
           <span className="text-sm font-medium">SMS</span>
         </div>
         <div className="flex items-center gap-2">
-          {driver.messaging.sms ? (
+          {messaging.sms_enabled ? (
             <Badge variant="outline" className="bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400">
               <Check className="mr-1 h-3 w-3" />
               Connected
@@ -410,7 +237,10 @@ function MessagingIntegration({
               Not Connected
             </Badge>
           )}
-          <Switch checked={driver.messaging.sms} onCheckedChange={(checked) => onUpdate(driver.id, "sms", checked)} />
+          <Switch
+            checked={messaging.sms_enabled}
+            onCheckedChange={(checked) => onUpdate(driver.id, "sms_enabled", checked)}
+          />
         </div>
       </div>
     </div>
@@ -419,6 +249,16 @@ function MessagingIntegration({
 
 // Performance Metrics component
 function PerformanceMetrics({ driver }: { driver: Driver }) {
+  const performance = driver.driver_performance?.[0]
+
+  if (!performance) {
+    return (
+      <div className="text-center py-4">
+        <p className="text-sm text-muted-foreground">No performance data available</p>
+      </div>
+    )
+  }
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -438,25 +278,25 @@ function PerformanceMetrics({ driver }: { driver: Driver }) {
         <Card>
           <CardContent className="p-4">
             <div className="text-sm font-medium text-muted-foreground">Total Miles</div>
-            <div className="mt-1 text-2xl font-bold">{formatNumber(driver.performance.totalMiles)}</div>
+            <div className="mt-1 text-2xl font-bold">{formatNumber(performance.total_miles)}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <div className="text-sm font-medium text-muted-foreground">Total Revenue</div>
-            <div className="mt-1 text-2xl font-bold">{formatCurrency(driver.performance.totalRevenue)}</div>
+            <div className="mt-1 text-2xl font-bold">{formatCurrency(performance.total_revenue)}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <div className="text-sm font-medium text-muted-foreground">Total Loads</div>
-            <div className="mt-1 text-2xl font-bold">{driver.performance.totalLoads}</div>
+            <div className="mt-1 text-2xl font-bold">{performance.total_loads}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <div className="text-sm font-medium text-muted-foreground">Average RPM</div>
-            <div className="mt-1 text-2xl font-bold">${driver.performance.averageRPM.toFixed(2)}</div>
+            <div className="mt-1 text-2xl font-bold">${performance.average_rpm.toFixed(2)}</div>
           </CardContent>
         </Card>
       </div>
@@ -465,112 +305,151 @@ function PerformanceMetrics({ driver }: { driver: Driver }) {
         <div>
           <div className="mb-1 flex items-center justify-between">
             <div className="text-sm font-medium">On-Time Delivery</div>
-            <div className="text-sm font-medium">{driver.performance.onTimeDelivery}%</div>
+            <div className="text-sm font-medium">{performance.on_time_delivery_rate}%</div>
           </div>
-          <Progress value={driver.performance.onTimeDelivery} className="h-2" />
+          <Progress value={performance.on_time_delivery_rate} className="h-2" />
         </div>
         <div>
           <div className="mb-1 flex items-center justify-between">
             <div className="text-sm font-medium">Load Acceptance Rate</div>
-            <div className="text-sm font-medium">{driver.performance.loadAcceptanceRate}%</div>
+            <div className="text-sm font-medium">{performance.load_acceptance_rate}%</div>
           </div>
-          <Progress value={driver.performance.loadAcceptanceRate} className="h-2" />
+          <Progress value={performance.load_acceptance_rate} className="h-2" />
         </div>
       </div>
-    </div>
-  )
-}
-
-// Inline Editable Notes component
-function InlineEditableNotes({
-  initialValue,
-  driverId,
-  onSave,
-}: {
-  initialValue?: string
-  driverId: string
-  onSave: (driverId: string, notes: string) => void
-}) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [value, setValue] = useState(initialValue || "")
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const { toast } = useToast()
-
-  const handleSave = () => {
-    onSave(driverId, value)
-    setIsEditing(false)
-    toast({
-      title: "Notes saved",
-      description: "Driver notes have been updated successfully",
-    })
-  }
-
-  if (isEditing) {
-    return (
-      <div className="flex flex-col gap-2">
-        <Textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          className="min-h-[100px] w-full text-sm"
-          placeholder="Add notes about this driver..."
-        />
-        <div className="flex gap-2">
-          <Button size="sm" onClick={handleSave}>
-            Save
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setIsEditing(false)}>
-            Cancel
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="cursor-pointer rounded-md p-2 text-sm hover:bg-muted/50" onClick={() => setIsEditing(true)}>
-      {value ? value : <span className="text-muted-foreground italic">Add notes about this driver...</span>}
     </div>
   )
 }
 
 export function DriversTable() {
-  const [data, setData] = useState<Driver[]>(initialData)
+  const [data, setData] = useState<Driver[]>([])
+  const [loading, setLoading] = useState(true)
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState({})
   const [globalFilter, setGlobalFilter] = useState("")
   const [statusFilter, setStatusFilter] = useState<string[]>([])
+  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null)
+  const [showProfileModal, setShowProfileModal] = useState(false)
   const { toast } = useToast()
 
-  // Handle messaging integration update
-  const handleMessagingUpdate = (driverId: string, platform: keyof Driver["messaging"], value: boolean) => {
-    setData((prevData) =>
-      prevData.map((driver) =>
-        driver.id === driverId
-          ? {
-              ...driver,
-              messaging: {
-                ...driver.messaging,
-                [platform]: value,
-              },
-            }
-          : driver,
-      ),
-    )
+  // Load drivers data
+  useEffect(() => {
+    loadDrivers()
+  }, [])
 
-    toast({
-      title: value ? "Integration connected" : "Integration disconnected",
-      description: `${platform.charAt(0).toUpperCase() + platform.slice(1)} has been ${
-        value ? "connected" : "disconnected"
-      } for this driver`,
-    })
+  const loadDrivers = async () => {
+    try {
+      setLoading(true)
+      const result = await getDrivers()
+      if (result.success) {
+        setData(result.data || [])
+      } else {
+        throw new Error(result.error)
+      }
+    } catch (error: any) {
+      console.error("Error loading drivers:", error)
+      setData([]) // Set empty array on error
+      toast({
+        title: "Error loading drivers",
+        description: error.message || "Failed to load drivers",
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
-  // Handle notes update
-  const handleNotesUpdate = (driverId: string, notes: string) => {
-    setData((prevData) => prevData.map((driver) => (driver.id === driverId ? { ...driver, notes } : driver)))
+  // Handle messaging integration update
+  const handleMessagingUpdate = useCallback(
+    async (driverId: string, platform: string, value: boolean) => {
+      try {
+        const result = await updateDriverMessaging(driverId, { [platform]: value })
+        if (result.success) {
+          // Update local state immediately for better UX
+          setData((prevData) =>
+            prevData.map((driver) =>
+              driver.id === driverId
+                ? {
+                    ...driver,
+                    driver_messaging: [
+                      {
+                        ...driver.driver_messaging?.[0],
+                        [platform]: value,
+                      },
+                    ],
+                  }
+                : driver,
+            ),
+          )
+
+          toast({
+            title: value ? "Integration connected" : "Integration disconnected",
+            description: `${platform.replace("_enabled", "").charAt(0).toUpperCase() + platform.replace("_enabled", "").slice(1)} has been ${
+              value ? "connected" : "disconnected"
+            } for this driver`,
+          })
+        } else {
+          throw new Error(result.error)
+        }
+      } catch (error: any) {
+        toast({
+          title: "Error updating messaging",
+          description: error.message,
+          variant: "destructive",
+        })
+      }
+    },
+    [toast],
+  )
+
+  // Handle status update
+  const handleStatusUpdate = async (driverId: string, newStatus: string) => {
+    try {
+      const result = await updateDriverStatus(driverId, newStatus)
+      if (result.success) {
+        await loadDrivers() // Reload data
+        toast({
+          title: "Status updated",
+          description: "Driver status has been updated successfully",
+        })
+      } else {
+        throw new Error(result.error)
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error updating status",
+        description: error.message,
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Handle driver deletion
+  const handleDeleteDriver = async (driverId: string) => {
+    if (!confirm("Are you sure you want to delete this driver? This action cannot be undone.")) {
+      return
+    }
+
+    try {
+      const result = await deleteDriver(driverId)
+      if (result.success) {
+        await loadDrivers() // Reload data
+        toast({
+          title: "Driver deleted",
+          description: "Driver has been removed from your fleet",
+        })
+      } else {
+        throw new Error(result.error)
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error deleting driver",
+        description: error.message,
+        variant: "destructive",
+      })
+    }
   }
 
   const columns: ColumnDef<Driver>[] = [
@@ -586,20 +465,21 @@ export function DriversTable() {
       },
       cell: ({ row }) => {
         const driver = row.original
+        const initials = driver.name
+          .split(" ")
+          .map((n) => n[0])
+          .join("")
+          .toUpperCase()
+
         return (
           <div className="flex items-center gap-3">
             <Avatar className="h-9 w-9">
-              <AvatarImage src={driver.avatar || "/placeholder.svg"} alt={driver.name} />
-              <AvatarFallback>
-                {driver.name
-                  .split(" ")
-                  .map((n) => n[0])
-                  .join("")}
-              </AvatarFallback>
+              <AvatarImage src={driver.avatar_url || "/placeholder.svg"} alt={driver.name} />
+              <AvatarFallback>{initials}</AvatarFallback>
             </Avatar>
             <div>
               <div className="font-medium">{driver.name}</div>
-              <div className="text-xs text-muted-foreground">{driver.id}</div>
+              <div className="text-xs text-muted-foreground">{driver.id.slice(0, 8)}</div>
             </div>
           </div>
         )
@@ -620,38 +500,55 @@ export function DriversTable() {
     {
       accessorKey: "location",
       header: "Location",
+      cell: ({ row }) => {
+        const driver = row.original
+        return <div>{driver.city && driver.state ? `${driver.city}, ${driver.state}` : "Not provided"}</div>
+      },
     },
     {
-      accessorKey: "phone",
+      accessorKey: "contact",
       header: "Contact",
       cell: ({ row }) => {
         const driver = row.original
         return (
           <div className="space-y-1">
-            <div className="flex items-center gap-1">
-              <Phone className="h-3 w-3 text-muted-foreground" />
-              <span>{driver.phone}</span>
-            </div>
-            <div className="text-xs text-muted-foreground">{driver.email}</div>
+            {driver.phone && (
+              <div className="flex items-center gap-1">
+                <Phone className="h-3 w-3 text-muted-foreground" />
+                <span className="text-sm">{driver.phone}</span>
+              </div>
+            )}
+            {driver.email && <div className="text-xs text-muted-foreground">{driver.email}</div>}
           </div>
         )
       },
     },
     {
-      accessorKey: "experience",
-      header: ({ column }) => {
+      accessorKey: "driver_type",
+      header: "Type",
+      cell: ({ row }) => {
+        const type = row.getValue("driver_type") as string
         return (
-          <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
-            Experience
-            <ArrowUpDown className="ml-2 h-4 w-4" />
-          </Button>
+          <Badge variant="outline">
+            {type?.replace("_", " ").replace(/\b\w/g, (l) => l.toUpperCase()) || "Company"}
+          </Badge>
         )
       },
+    },
+    {
+      accessorKey: "equipment",
+      header: "Equipment",
       cell: ({ row }) => {
-        const experience = row.getValue("experience") as number
+        const driver = row.original
         return (
-          <div>
-            {experience} {experience === 1 ? "year" : "years"}
+          <div className="text-sm">
+            {driver.truck_number && <div>Truck: {driver.truck_number}</div>}
+            {driver.trailer_number && (
+              <div className="text-xs text-muted-foreground">Trailer: {driver.trailer_number}</div>
+            )}
+            {!driver.truck_number && !driver.trailer_number && (
+              <span className="text-muted-foreground">Not assigned</span>
+            )}
           </div>
         )
       },
@@ -683,8 +580,9 @@ export function DriversTable() {
       header: "Messaging",
       cell: ({ row }) => {
         const driver = row.original
-        const connectedCount = Object.values(driver.messaging).filter(Boolean).length
-        const totalPlatforms = Object.keys(driver.messaging).length
+        const messaging = driver.driver_messaging?.[0]
+        const connectedCount = messaging ? Object.values(messaging).filter(Boolean).length : 1 // Default SMS enabled
+        const totalPlatforms = 4 // telegram, whatsapp, sms, email
 
         return (
           <Popover>
@@ -707,39 +605,6 @@ export function DriversTable() {
       },
     },
     {
-      accessorKey: "notes",
-      header: "Manager Notes",
-      cell: ({ row }) => {
-        const driver = row.original
-        return (
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "flex w-full max-w-[200px] items-center justify-start truncate text-left",
-                  !driver.notes && "text-muted-foreground",
-                )}
-              >
-                {driver.notes ? (
-                  <span className="truncate">{driver.notes}</span>
-                ) : (
-                  <span className="italic">Add notes...</span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-96" align="start">
-              <div className="space-y-4 p-2">
-                <h4 className="font-medium">Manager Notes</h4>
-                <InlineEditableNotes initialValue={driver.notes} driverId={driver.id} onSave={handleNotesUpdate} />
-              </div>
-            </PopoverContent>
-          </Popover>
-        )
-      },
-    },
-    {
       id: "actions",
       cell: ({ row }) => {
         const driver = row.original
@@ -754,15 +619,30 @@ export function DriversTable() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>Actions</DropdownMenuLabel>
+              <DropdownMenuItem
+                onClick={() => {
+                  setSelectedDriverId(driver.id)
+                  setShowProfileModal(true)
+                }}
+              >
+                <Eye className="mr-2 h-4 w-4" />
+                View Profile
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => navigator.clipboard.writeText(driver.id)}>
                 Copy driver ID
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>View profile</DropdownMenuItem>
-              <DropdownMenuItem>Edit driver</DropdownMenuItem>
-              <DropdownMenuItem>View assigned loads</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleStatusUpdate(driver.id, "available")}>
+                Set Available
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleStatusUpdate(driver.id, "off_duty")}>
+                Set Off Duty
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>Contact driver</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleDeleteDriver(driver.id)} className="text-red-600">
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete Driver
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         )
@@ -771,27 +651,29 @@ export function DriversTable() {
   ]
 
   // Apply filters
-  const filteredData = [...initialData].filter((driver) => {
-    // Apply status filter
-    if (statusFilter.length > 0 && !statusFilter.includes(driver.status)) {
-      return false
-    }
+  const filteredData = useMemo(() => {
+    return data.filter((driver) => {
+      // Apply status filter
+      if (statusFilter.length > 0 && !statusFilter.includes(driver.status)) {
+        return false
+      }
 
-    // Apply global filter (search)
-    if (globalFilter) {
-      const searchTerm = globalFilter.toLowerCase()
-      return (
-        driver.name.toLowerCase().includes(searchTerm) ||
-        driver.id.toLowerCase().includes(searchTerm) ||
-        driver.location.toLowerCase().includes(searchTerm) ||
-        driver.email.toLowerCase().includes(searchTerm) ||
-        driver.phone.toLowerCase().includes(searchTerm) ||
-        false
-      )
-    }
+      // Apply global filter (search)
+      if (globalFilter) {
+        const searchTerm = globalFilter.toLowerCase()
+        return (
+          driver.name.toLowerCase().includes(searchTerm) ||
+          driver.id.toLowerCase().includes(searchTerm) ||
+          driver.email?.toLowerCase().includes(searchTerm) ||
+          driver.phone?.toLowerCase().includes(searchTerm) ||
+          `${driver.city}, ${driver.state}`.toLowerCase().includes(searchTerm) ||
+          false
+        )
+      }
 
-    return true
-  })
+      return true
+    })
+  }, [data, statusFilter, globalFilter])
 
   const table = useReactTable({
     data: filteredData,
@@ -811,6 +693,17 @@ export function DriversTable() {
       rowSelection,
     },
   })
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+          <p className="text-sm text-muted-foreground">Loading drivers...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -837,33 +730,33 @@ export function DriversTable() {
               <DropdownMenuLabel>Filter by Status</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuCheckboxItem
-                checked={statusFilter.includes("AVAILABLE")}
+                checked={statusFilter.includes("available")}
                 onCheckedChange={(checked) => {
-                  setStatusFilter((prev) => (checked ? [...prev, "AVAILABLE"] : prev.filter((s) => s !== "AVAILABLE")))
+                  setStatusFilter((prev) => (checked ? [...prev, "available"] : prev.filter((s) => s !== "available")))
                 }}
               >
                 Available
               </DropdownMenuCheckboxItem>
               <DropdownMenuCheckboxItem
-                checked={statusFilter.includes("ON_DUTY")}
+                checked={statusFilter.includes("on_duty")}
                 onCheckedChange={(checked) => {
-                  setStatusFilter((prev) => (checked ? [...prev, "ON_DUTY"] : prev.filter((s) => s !== "ON_DUTY")))
+                  setStatusFilter((prev) => (checked ? [...prev, "on_duty"] : prev.filter((s) => s !== "on_duty")))
                 }}
               >
                 On Duty
               </DropdownMenuCheckboxItem>
               <DropdownMenuCheckboxItem
-                checked={statusFilter.includes("OFF_DUTY")}
+                checked={statusFilter.includes("off_duty")}
                 onCheckedChange={(checked) => {
-                  setStatusFilter((prev) => (checked ? [...prev, "OFF_DUTY"] : prev.filter((s) => s !== "OFF_DUTY")))
+                  setStatusFilter((prev) => (checked ? [...prev, "off_duty"] : prev.filter((s) => s !== "off_duty")))
                 }}
               >
                 Off Duty
               </DropdownMenuCheckboxItem>
               <DropdownMenuCheckboxItem
-                checked={statusFilter.includes("ON_BREAK")}
+                checked={statusFilter.includes("on_break")}
                 onCheckedChange={(checked) => {
-                  setStatusFilter((prev) => (checked ? [...prev, "ON_BREAK"] : prev.filter((s) => s !== "ON_BREAK")))
+                  setStatusFilter((prev) => (checked ? [...prev, "on_break"] : prev.filter((s) => s !== "on_break")))
                 }}
               >
                 On Break
@@ -933,13 +826,14 @@ export function DriversTable() {
             ) : (
               <TableRow>
                 <TableCell colSpan={columns.length} className="h-24 text-center">
-                  No results.
+                  No drivers found.
                 </TableCell>
               </TableRow>
             )}
           </TableBody>
         </Table>
       </div>
+
       <div className="flex items-center justify-end space-x-2">
         <div className="flex-1 text-sm text-muted-foreground">
           {table.getFilteredRowModel().rows.length} driver(s) total
@@ -958,6 +852,16 @@ export function DriversTable() {
           </Button>
         </div>
       </div>
+
+      {/* Driver Profile Modal */}
+      <DriverProfileModal
+        isOpen={showProfileModal}
+        onClose={() => {
+          setShowProfileModal(false)
+          setSelectedDriverId(null)
+        }}
+        driverId={selectedDriverId}
+      />
     </div>
   )
 }
