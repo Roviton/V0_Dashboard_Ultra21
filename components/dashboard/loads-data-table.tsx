@@ -16,11 +16,31 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useModal } from "@/hooks/use-modal"
 import { cn } from "@/lib/utils"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ChevronRightIcon, ChevronDownIcon, FileText, ZoomIn, ZoomOut, Download, Loader2, AlertCircle, MoreHorizontal, Eye, User, CheckCircle, XCircle, ArrowUpDown, Package, Building, Truck, MapPin } from 'lucide-react'
+import {
+  ChevronRightIcon,
+  ChevronDownIcon,
+  FileText,
+  ZoomIn,
+  ZoomOut,
+  Download,
+  Loader2,
+  AlertCircle,
+  MoreHorizontal,
+  Eye,
+  User,
+  CheckCircle,
+  XCircle,
+  ArrowUpDown,
+  Package,
+  Building,
+  Truck,
+  MapPin,
+} from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { useToast } from "@/hooks/use-toast"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { AICommunicationPanel } from "@/components/dashboard/modals/ai-communication-panel"
 
 interface Load {
   id: string
@@ -722,10 +742,14 @@ export function LoadsDataTable({
                 <Eye className="mr-2 h-4 w-4" /> View Details
               </DropdownMenuItem>
               {isActiveLoad(load.status) && (
-                <DropdownMenuItem onClick={() => onOpen("assignDriver", { 
-                  data: load,
-                  onAssign: onAssignDriver 
-                })}>
+                <DropdownMenuItem
+                  onClick={() =>
+                    onOpen("assignDriver", {
+                      data: load,
+                      onAssign: onAssignDriver,
+                    })
+                  }
+                >
                   <User className="mr-2 h-4 w-4" /> Assign Driver
                 </DropdownMenuItem>
               )}
@@ -1291,7 +1315,7 @@ export function LoadsDataTable({
                 </div>
               </TabsContent>
               <TabsContent value="communication" className="p-6">
-                <div className="text-center text-muted-foreground">Communication content coming soon...</div>
+                <AICommunicationPanel load={load} />
               </TabsContent>
               <TabsContent value="timeline" className="p-6">
                 <div className="text-center text-muted-foreground">Timeline content coming soon...</div>

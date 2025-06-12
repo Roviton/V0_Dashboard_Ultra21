@@ -510,138 +510,216 @@ function cleanExtractedData(data: any): any {
   return data
 }
 
-// Generate broker email using available AI service
-export async function generateBrokerEmail(loadDetails: any) {
+// Helper function to format date for display
+function formatDate(dateString: string | null | undefined): string {
+  if (!dateString) return "Not specified"
   try {
-    console.log("generateBrokerEmail called with:", JSON.stringify(loadDetails, null, 2))
+    const date = new Date(dateString)
+    return date.toLocaleDateString("en-US", {
+      month: "numeric",
+      day: "numeric",
+      year: "numeric",
+    })
+  } catch (e) {
+    return dateString
+  }
+}
 
-    const brokerName = loadDetails.broker?.name || loadDetails.consignee?.name || "there"
-    const brokerEmail = loadDetails.broker?.email || loadDetails.consignee?.email || "broker@example.com"
-    const driverName = loadDetails.driver?.name || "our driver"
-    const loadNumber = loadDetails.loadNumber || "L-XXXX"
+// Helper function to format location
+function formatLocation(location: any): string {
+  if (!location) return "Not specified"
 
-    // Try Anthropic first, then OpenAI
-    const anthropicKey = process.env.ANTHROPIC_API_KEY
-    const openaiKey = process.env.OPENAI_API_KEY
+  const parts = []
+  if (location.city) parts.push(location.city)
+  if (location.state) parts.push(location.state)
 
-    const emailPrompt = `Generate a professional, concise email to the broker with this format:
+  return parts.length > 0 ? parts.join(", ") : "Not specified"
+}
 
-To: ${brokerEmail}
-Subject: Load ${loadNumber} - Status Update
+// Update the extractLoadData function to prioritize reference numbers and include hours
+function extractLoadData(loadData: any) {
+  console.log("Extracting load data:", JSON.stringify(loadData, null, 2))
 
-Hello ${brokerName.split(" ")[0] || "there"},
+  // Use reference number instead of load number
+  const referenceNumber = loadData?.reference_number || loadData?.load_number || loadData?.loadNumber || "Unknown"
 
-I wanted to update you on load ${loadNumber}. Our driver ${driverName} has successfully completed pickup and is now en route to the delivery destination.
+  // Get customer name from database
+  const customerName = loadData?.customer?.name || loadData?.customer_name || "Unknown Customer"
 
-Current Status: En Route
-Pickup Completed: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
-Estimated Delivery: ${loadDetails.deliveryDate || "TBD"}
-Route: ${loadDetails.pickupLocation?.address || "Pickup Location"}, ${loadDetails.pickupLocation?.city || ""} ${
-      loadDetails.pickupLocation?.state || ""
-    } → ${loadDetails.deliveryLocation?.address || "Delivery Location"}, ${
-      loadDetails.deliveryLocation?.city || ""
-    } ${loadDetails.deliveryLocation?.state || ""}
+  // Format pickup and delivery locations
+  const pickupLocation = `${loadData?.pickup_city || "Unknown"}, ${loadData?.pickup_state || "Unknown"}`
+  const deliveryLocation = `${loadData?.delivery_city || "Unknown"}, ${loadData?.delivery_state || "Unknown"}`
 
-The load is secure and we're tracking progress in real-time. I'll send another update when the driver arrives at the delivery location.
+  // Get dates
+  const pickupDate = formatDate(loadData?.pickup_date)
+  const deliveryDate = formatDate(loadData?.delivery_date)
 
-Best regards,
-Forward Strong LLC Dispatch`
+  // Get pickup and delivery hours
+  const pickupHours = loadData?.pickup_hours || loadData?.pickup_time || "Hours not specified"
+  const deliveryHours = loadData?.delivery_hours || loadData?.delivery_time || "Hours not specified"
 
-    if (anthropicKey) {
-      console.log("Generating email with Claude...")
-      const { text } = await generateText({
-        model: anthropic(AI_MODELS.ANTHROPIC_CLAUDE),
-        prompt: emailPrompt,
-        maxTokens: 400,
-      })
+  // Get driver info
+  const driverName = loadData?.driver?.name || loadData?.driver_name || "Unassigned"
 
-      console.log("Claude email response:", text)
-      return { success: true, email: text }
-    } else if (openaiKey) {
-      console.log("Generating email with OpenAI...")
-      const { text } = await generateText({
-        model: openai(AI_MODELS.OPENAI_GPT4O),
-        prompt: emailPrompt,
-        maxTokens: 400,
-      })
+  // Get status
+  const status = loadData?.status || "Unknown"
 
-      console.log("OpenAI email response:", text)
-      return { success: true, email: text }
-    } else {
-      throw new Error("No AI API keys available")
+  // Get rate
+  const rate = loadData?.rate ? `$${loadData.rate}` : "Rate not specified"
+
+  // Get special instructions
+  const specialInstructions = loadData?.special_instructions || "None"
+
+  // Get commodity
+  const commodity = loadData?.commodity || "Not specified"
+
+  // Get weight
+  const weight = loadData?.weight ? `${loadData.weight} lbs` : "Not specified"
+
+  // Get broker info from uploaded document if available
+  const brokerName = loadData?.broker_name || "Broker"
+  const brokerEmail = loadData?.broker_email || ""
+
+  return {
+    referenceNumber,
+    customerName,
+    pickupLocation,
+    deliveryLocation,
+    pickupDate,
+    deliveryDate,
+    pickupHours,
+    deliveryHours,
+    driverName,
+    status,
+    rate,
+    specialInstructions,
+    commodity,
+    weight,
+    brokerName,
+    brokerEmail,
+    pickupAddress: loadData?.pickup_address || "Address not specified",
+    deliveryAddress: loadData?.delivery_address || "Address not specified",
+  }
+}
+
+// Update the broker email generation function to use reference number
+export async function generateBrokerEmail(loadData: any) {
+  try {
+    console.log("Generating broker email for load:", JSON.stringify(loadData, null, 2))
+
+    const load = extractLoadData(loadData)
+
+    const prompt = `Write a professional email to the broker regarding Reference #${load.referenceNumber}.
+
+LOAD DETAILS:
+- Reference #: ${load.referenceNumber}
+- Customer: ${load.customerName}
+- Status: ${load.status}
+- Driver: ${load.driverName}
+- Route: ${load.pickupLocation} → ${load.deliveryLocation}
+- Pickup Date: ${load.pickupDate}
+- Delivery Date: ${load.deliveryDate}
+- Rate: ${load.rate}
+
+Write a concise, professional email that:
+1. References the specific reference number
+2. Mentions the customer name
+3. Provides a status update
+4. Includes pickup and delivery information
+5. Mentions the assigned driver
+6. Asks for any additional requirements or confirmations
+
+Keep it brief and professional. Address it to "${load.brokerName}" if available.`
+
+    const { text } = await generateText({
+      model: openai("gpt-4o"),
+      prompt,
+      temperature: 0.3,
+      maxTokens: 500,
+    })
+
+    return {
+      success: true,
+      email: text,
     }
   } catch (error) {
-    console.error("generateBrokerEmail error:", error)
+    console.error("Error generating broker email:", error)
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: error instanceof Error ? error.message : "Unknown error occurred",
     }
   }
 }
 
-// Generate driver instructions using available AI service
-export async function generateDriverInstructions(loadDetails: any) {
+// Update the driver instructions function to use reference number and include hours
+export async function generateDriverInstructions(loadData: any) {
   try {
-    console.log("generateDriverInstructions called with:", JSON.stringify(loadDetails, null, 2))
+    console.log("Generating driver instructions for load:", JSON.stringify(loadData, null, 2))
 
-    const loadNumber = loadDetails.loadNumber || "N/A"
+    const load = extractLoadData(loadData)
 
-    // Try Anthropic first, then OpenAI
-    const anthropicKey = process.env.ANTHROPIC_API_KEY
-    const openaiKey = process.env.OPENAI_API_KEY
-
-    const instructionsPrompt = `Create concise, practical driver instructions:
-
-LOAD: ${loadNumber}
-
-PICKUP INFORMATION:
-- Location: ${loadDetails.pickupLocation?.address || "Pickup Location"}
-- Special Instructions: ${loadDetails.specialInstructions || "Standard pickup procedures"}
-
-DELIVERY INFORMATION:
-- Location: ${loadDetails.deliveryLocation?.address || "Delivery Location"}
-- Special Instructions: ${loadDetails.specialInstructions || "Standard delivery procedures"}
+    const prompt = `Create brief, focused driver instructions for Reference #${load.referenceNumber}.
 
 LOAD DETAILS:
-- Commodity: ${loadDetails.commodity || "Vehicle"}
-- VIN (if applicable): ${loadDetails.vin || "See BOL"}
-- Special Handling: ${loadDetails.specialInstructions || "Follow standard procedures"}
+- Reference #: ${load.referenceNumber}
+- Customer: ${load.customerName}
+- Route: ${load.pickupLocation} → ${load.deliveryLocation}
+- Pickup: ${load.pickupAddress} on ${load.pickupDate}
+- Pickup Hours: ${load.pickupHours}
+- Delivery: ${load.deliveryAddress} on ${load.deliveryDate}
+- Delivery Hours: ${load.deliveryHours}
+- Commodity: ${load.commodity}
+- Weight: ${load.weight}
+- Special Instructions: ${load.specialInstructions}
 
-IMPORTANT REMINDERS:
-- Complete vehicle inspection at pickup and delivery
-- Take photos of any existing damage
-- Secure vehicle properly for transport
+Format as bullet points with only essential information:
+• Reference number and customer
+• Pickup location, date, and hours
+• Delivery location, date, and hours
+• Any special handling requirements
+• Key contact information if available
+• Important delivery instructions
 
-Keep it brief, practical, and driver-focused.`
+Keep it concise - maximum 7 bullet points with essential details only.`
 
-    if (anthropicKey) {
-      console.log("Generating instructions with Claude...")
-      const { text } = await generateText({
-        model: anthropic(AI_MODELS.ANTHROPIC_CLAUDE),
-        prompt: instructionsPrompt,
-        maxTokens: 500,
-      })
+    const { text } = await generateText({
+      model: openai("gpt-4o"),
+      prompt,
+      temperature: 0.3,
+      maxTokens: 400,
+    })
 
-      console.log("Claude instructions response:", text)
-      return { success: true, instructions: text }
-    } else if (openaiKey) {
-      console.log("Generating instructions with OpenAI...")
-      const { text } = await generateText({
-        model: openai(AI_MODELS.OPENAI_GPT4O),
-        prompt: instructionsPrompt,
-        maxTokens: 500,
-      })
-
-      console.log("OpenAI instructions response:", text)
-      return { success: true, instructions: text }
-    } else {
-      throw new Error("No AI API keys available")
+    return {
+      success: true,
+      instructions: text,
     }
   } catch (error) {
-    console.error("generateDriverInstructions error:", error)
+    console.error("Error generating driver instructions:", error)
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    }
+  }
+}
+
+export async function testAIConnection() {
+  try {
+    const { text } = await generateText({
+      model: openai("gpt-4o"),
+      prompt: "Respond with 'AI connection successful' if you can read this message.",
+      temperature: 0,
+      maxTokens: 20,
+    })
+
+    return {
+      success: true,
+      message: text,
+    }
+  } catch (error) {
+    console.error("AI connection test failed:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
     }
   }
 }

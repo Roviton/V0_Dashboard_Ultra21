@@ -37,8 +37,18 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
             <div className="flex items-center">
-              <Truck className="h-8 w-8 text-blue-600" />
-              <span className="ml-2 text-xl font-bold text-gray-900">FreightDispatch</span>
+              <div className="relative group">
+                <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-blue-800 rounded-lg blur opacity-20 group-hover:opacity-30 transition duration-500"></div>
+                <div className="relative bg-gradient-to-r from-blue-600 to-blue-800 rounded-lg p-3 transform group-hover:scale-105 transition duration-200">
+                  <Truck className="h-8 w-8 text-white" />
+                </div>
+              </div>
+              <div className="ml-3">
+                <div className="text-3xl font-black text-gray-900">
+                  Ultra<span className="text-blue-600 font-extrabold">21</span>
+                </div>
+                <div className="text-xs text-gray-600 font-medium tracking-wide">Freight Solutions</div>
+              </div>
             </div>
             <div className="flex items-center space-x-4">
               <Link href="/login">
@@ -206,8 +216,8 @@ export default function HomePage() {
                   ))}
                 </div>
                 <p className="text-gray-600 mb-4">
-                  "FreightDispatch has revolutionized our operations. We've reduced dispatch time by 60% and improved
-                  driver satisfaction significantly."
+                  "Ultra21 has revolutionized our operations. We've reduced dispatch time by 60% and improved driver
+                  satisfaction significantly."
                 </p>
                 <div className="flex items-center">
                   <div className="w-10 h-10 bg-gray-300 rounded-full mr-3"></div>
@@ -271,7 +281,7 @@ export default function HomePage() {
             Ready to Transform Your Dispatch Operations?
           </h2>
           <p className="text-xl text-gray-300 mb-8 max-w-2xl mx-auto">
-            Join hundreds of freight companies that trust FreightDispatch to manage their operations efficiently.
+            Join hundreds of freight companies that trust Ultra21 to manage their operations efficiently.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link href="/login">
@@ -297,8 +307,18 @@ export default function HomePage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             <div>
               <div className="flex items-center mb-4">
-                <Truck className="h-8 w-8 text-blue-400" />
-                <span className="ml-2 text-xl font-bold">FreightDispatch</span>
+                <div className="relative">
+                  <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-blue-800 rounded-lg blur opacity-20"></div>
+                  <div className="relative bg-gradient-to-r from-blue-600 to-blue-800 rounded-lg p-2">
+                    <Truck className="h-6 w-6 text-white" />
+                  </div>
+                </div>
+                <div className="ml-2">
+                  <div className="text-2xl font-black text-white">
+                    Ultra<span className="text-blue-300 font-extrabold">21</span>
+                  </div>
+                  <div className="text-xs text-gray-400 font-medium">Freight Solutions</div>
+                </div>
               </div>
               <p className="text-gray-300">
                 The most comprehensive freight dispatch management system for modern logistics companies.
@@ -381,7 +401,7 @@ export default function HomePage() {
             </div>
           </div>
           <div className="border-t border-gray-700 mt-8 pt-8 text-center text-gray-300">
-            <p>&copy; 2024 FreightDispatch. All rights reserved.</p>
+            <p>&copy; 2024 Ultra21. All rights reserved.</p>
           </div>
         </div>
       </footer>
