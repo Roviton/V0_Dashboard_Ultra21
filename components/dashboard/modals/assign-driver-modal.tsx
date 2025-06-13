@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
-import { supabase } from "@/lib/supabase-client"
+import { supabase } from "@/lib/supabase"
 import { Loader2, AlertTriangle } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
@@ -25,7 +25,7 @@ interface Driver {
   id: string
   name: string
   avatar?: string
-  status: string
+  status: "available" | "booked" | "out_of_service" | "on_vacation"
   location?: string
   lastDelivery?: string
   rating?: number
@@ -77,11 +77,12 @@ export function AssignDriverModal({ isOpen, onClose, load, onAssign }: AssignDri
       try {
         console.log("Fetching drivers and current assignment...")
 
-        // Fetch available drivers
+        // Fetch available drivers - only show drivers with "available" or "booked" status
         const { data: driversData, error: driversError } = await supabase
           .from("drivers")
           .select("*")
           .eq("is_active", true)
+          .in("status", ["available", "booked"]) // Allow both available and booked drivers
           .order("name")
 
         if (driversError) {
@@ -114,7 +115,7 @@ export function AssignDriverModal({ isOpen, onClose, load, onAssign }: AssignDri
               id: driver.id,
               name: driver.name,
               avatar: driver.avatar_url || "/placeholder.svg",
-              status: driver.status === "available" ? "Available" : driver.status || "Unknown",
+              status: driver.status,
               location: driver.location || "Unknown",
               lastDelivery: driver.last_delivery || "N/A",
               rating: driver.rating || 4.5,
@@ -188,18 +189,30 @@ export function AssignDriverModal({ isOpen, onClose, load, onAssign }: AssignDri
       // Call the onAssign callback if provided
       if (onAssign) {
         await onAssign(load.id, selectedDriver)
+
+        // Send notification message (this would be implemented in a real system)
+        console.log("Sending notification:", messageText)
+
+        toast({
+          title: "Driver Assigned",
+          description: "Driver has been successfully assigned to this load.",
+        })
+
+        // Reset form and close modal
+        setSelectedDriver("")
+        setMessageText("")
+        onClose()
       } else {
         // Fallback: direct database call (this should be avoided in favor of the hook)
         throw new Error("Assignment function not provided")
       }
-
-      // Reset form and close modal
-      setSelectedDriver("")
-      setMessageText("")
-      onClose()
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error assigning driver:", error)
-      // Error handling is done in the assignDriver function
+      toast({
+        title: "Error",
+        description: error.message || "Failed to assign driver. Please try again.",
+        variant: "destructive",
+      })
     } finally {
       setAssigning(false)
     }
@@ -294,7 +307,7 @@ export function AssignDriverModal({ isOpen, onClose, load, onAssign }: AssignDri
                           </AvatarFallback>
                         </Avatar>
                         <span>{driver.name}</span>
-                        <Badge variant={driver.status === "Available" ? "outline" : "secondary"} className="ml-auto">
+                        <Badge variant={driver.status === "available" ? "outline" : "secondary"} className="ml-auto">
                           {driver.status}
                         </Badge>
                       </div>
@@ -329,7 +342,7 @@ export function AssignDriverModal({ isOpen, onClose, load, onAssign }: AssignDri
                       <p>Rating: {selectedDriverInfo.rating || "N/A"}/5.0</p>
                     </div>
                   </div>
-                  <Badge variant={selectedDriverInfo.status === "Available" ? "outline" : "secondary"}>
+                  <Badge variant={selectedDriverInfo.status === "available" ? "outline" : "secondary"}>
                     {selectedDriverInfo.status}
                   </Badge>
                 </div>

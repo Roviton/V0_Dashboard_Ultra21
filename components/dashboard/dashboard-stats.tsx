@@ -1,96 +1,48 @@
 "use client"
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { TrendingUp, TrendingDown, DollarSign, Truck, Users } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { useMemo } from "react"
 
-interface DashboardStatsProps {
-  loads: any[]
-  className?: string
+interface Load {
+  status?: string
+  rate?: string | number
 }
 
-export function DashboardStats({ loads, className }: DashboardStatsProps) {
-  // Calculate stats safely
-  const totalLoads = loads.length
-  const activeLoads = loads.filter(
-    (load) =>
-      load.status === "new" ||
-      load.status === "assigned" ||
-      load.status === "accepted" ||
-      load.status === "in_progress",
-  ).length
+interface DashboardStatsProps {
+  loads?: Load[]
+  loading?: boolean
+}
 
-  const completedLoads = loads.filter((load) => load.status === "completed").length
+export function DashboardStats({ loads = [], loading = false }: DashboardStatsProps) {
+  const safeLoads = loads || []
 
-  const unassignedLoads = loads.filter((load) => !load.load_drivers || load.load_drivers.length === 0).length
+  const stats = useMemo(() => {
+    const activeLoads = safeLoads.filter((load) =>
+      ["new", "assigned", "accepted", "in_progress"].includes(load?.status || ""),
+    )
 
-  // Calculate average rate safely
-  const loadsWithRates = loads.filter((load) => load.rate && typeof load.rate === "number")
-  const averageRate =
-    loadsWithRates.length > 0 ? loadsWithRates.reduce((sum, load) => sum + load.rate, 0) / loadsWithRates.length : 0
+    const completedLoads = safeLoads.filter((load) => load?.status === "completed")
 
-  // Calculate total revenue from completed loads
-  const completedLoadsWithRates = loads.filter(
-    (load) => load.status === "completed" && load.rate && typeof load.rate === "number",
-  )
-  const totalRevenue = completedLoadsWithRates.reduce((sum, load) => sum + load.rate, 0)
+    const totalRevenue = safeLoads.reduce((sum, load) => {
+      const rate = typeof load?.rate === "string" ? Number.parseFloat(load.rate) : load?.rate || 0
+      return sum + (isNaN(rate) ? 0 : rate)
+    }, 0)
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(amount)
-  }
+    const avgRate = safeLoads.length > 0 ? totalRevenue / safeLoads.length : 0
 
-  const stats = [
-    {
-      title: "Active Loads",
-      value: activeLoads.toString(),
-      description: "Currently active",
-      icon: Truck,
-      trend: activeLoads > 0 ? "up" : "neutral",
-    },
-    {
-      title: "Pending Assignment",
-      value: unassignedLoads.toString(),
-      description: "Awaiting driver assignment",
-      icon: Users,
-      trend: unassignedLoads > 0 ? "down" : "up",
-    },
-    {
-      title: "Average Rate",
-      value: formatCurrency(averageRate),
-      description: "Per load average",
-      icon: DollarSign,
-      trend: "neutral",
-    },
-    {
-      title: "Total Revenue",
-      value: formatCurrency(totalRevenue),
-      description: `From ${completedLoads} completed loads`,
-      icon: TrendingUp,
-      trend: totalRevenue > 0 ? "up" : "neutral",
-    },
-  ]
+    return {
+      activeLoads: activeLoads.length,
+      completedLoads: completedLoads.length,
+      totalRevenue,
+      avgRate,
+    }
+  }, [safeLoads])
 
   return (
-    <div className={cn("grid gap-4 md:grid-cols-2 lg:grid-cols-4", className)}>
-      {stats.map((stat, index) => (
-        <Card key={index}>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">{stat.title}</CardTitle>
-            <stat.icon className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stat.value}</div>
-            <p className="text-xs text-muted-foreground flex items-center">
-              {stat.trend === "up" && <TrendingUp className="h-3 w-3 mr-1 text-green-500" />}
-              {stat.trend === "down" && <TrendingDown className="h-3 w-3 mr-1 text-red-500" />}
-              {stat.description}
-            </p>
-          </CardContent>
-        </Card>
-      ))}
+    <div>
+      <p>Active Loads: {stats.activeLoads}</p>
+      <p>Completed Loads: {stats.completedLoads}</p>
+      <p>Total Revenue: {stats.totalRevenue}</p>
+      <p>Average Rate: {stats.avgRate}</p>
     </div>
   )
 }

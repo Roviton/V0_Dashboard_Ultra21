@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
 import {
   type ColumnDef,
   type ColumnFiltersState,
@@ -685,56 +685,55 @@ export function LoadsTable({ isDispatcherView = false }: LoadsTableProps) {
   ]
 
   // Apply filters
+  const filteredData = useMemo(() => {
+    return (data || []).filter((load) => {
+      // Apply status filter
+      if (statusFilter && statusFilter.length > 0 && !statusFilter.includes(load.status)) {
+        return false
+      }
+
+      // Apply customer filter
+      if (customerFilter && customerFilter.length > 0 && !customerFilter.includes(load.customer)) {
+        return false
+      }
+
+      // Apply driver filter
+      if (driverFilter && driverFilter.length > 0 && load.driver && !driverFilter.includes(load.driver.name)) {
+        return false
+      }
+
+      // Apply date range filter
+      if (dateRange?.from) {
+        const pickupDate = new Date(load.pickupDate)
+        if (pickupDate < dateRange.from) return false
+      }
+
+      if (dateRange?.to) {
+        const pickupDate = new Date(load.pickupDate)
+        if (pickupDate > dateRange.to) return false
+      }
+
+      // Apply global filter (search)
+      if (globalFilter) {
+        const searchTerm = globalFilter.toLowerCase()
+        return (
+          load.id?.toLowerCase().includes(searchTerm) ||
+          load.reference?.toLowerCase().includes(searchTerm) ||
+          load.customer?.toLowerCase().includes(searchTerm) ||
+          load.origin?.toLowerCase().includes(searchTerm) ||
+          load.destination?.toLowerCase().includes(searchTerm) ||
+          load.driver?.name?.toLowerCase().includes(searchTerm) ||
+          false
+        )
+      }
+
+      return true
+    })
+  }, [data, statusFilter, customerFilter, driverFilter, dateRange, globalFilter])
+
   useEffect(() => {
-    let filteredData = [...initialData]
-
-    // Apply status filter
-    if (statusFilter.length > 0) {
-      filteredData = filteredData.filter((load) => statusFilter.includes(load.status))
-    }
-
-    // Apply customer filter
-    if (customerFilter.length > 0) {
-      filteredData = filteredData.filter((load) => customerFilter.includes(load.customer))
-    }
-
-    // Apply driver filter
-    if (driverFilter.length > 0) {
-      filteredData = filteredData.filter((load) => load.driver && driverFilter.includes(load.driver.name))
-    }
-
-    // Apply date range filter
-    if (dateRange.from) {
-      filteredData = filteredData.filter((load) => {
-        const pickupDate = new Date(load.pickupDate)
-        return pickupDate >= dateRange.from!
-      })
-    }
-
-    if (dateRange.to) {
-      filteredData = filteredData.filter((load) => {
-        const pickupDate = new Date(load.pickupDate)
-        return pickupDate <= dateRange.to!
-      })
-    }
-
-    // Apply global filter (search)
-    if (globalFilter) {
-      const searchTerm = globalFilter.toLowerCase()
-      filteredData = filteredData.filter(
-        (load) =>
-          load.id.toLowerCase().includes(searchTerm) ||
-          load.reference.toLowerCase().includes(searchTerm) ||
-          load.customer.toLowerCase().includes(searchTerm) ||
-          load.origin.toLowerCase().includes(searchTerm) ||
-          load.destination.toLowerCase().includes(searchTerm) ||
-          load.driver?.name.toLowerCase().includes(searchTerm) ||
-          false,
-      )
-    }
-
     setData(filteredData)
-  }, [statusFilter, customerFilter, driverFilter, dateRange, globalFilter])
+  }, [filteredData])
 
   const table = useReactTable({
     data,

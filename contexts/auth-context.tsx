@@ -3,14 +3,14 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
 import { supabase } from "@/lib/supabase"
 
-export type UserRole = "dispatcher" | "admin" | "manager" | "accountant"
+export type UserRole = "admin" | "dispatcher"
 
 interface User {
   id: string
   name: string
   email: string
   role: UserRole
-  companyId: string // This is what our components expect
+  companyId: string
   avatar?: string
 }
 
@@ -20,11 +20,13 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>
   logout: () => void
   hasPermission: (permission: string) => boolean
+  isAdmin: () => boolean
+  isDispatcher: () => boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-// Sample users with EXACT company_id from your database
+// Sample users for MVP testing
 const sampleUsers = [
   {
     id: "550e8400-e29b-41d4-a716-446655440010",
@@ -32,7 +34,7 @@ const sampleUsers = [
     email: "admin@example.com",
     role: "admin" as UserRole,
     avatar: "/stylized-letters-sj.png",
-    companyId: "550e8400-e29b-41d4-a716-446655440000", // Using the exact company_id from your DB
+    companyId: "550e8400-e29b-41d4-a716-446655440000",
   },
   {
     id: "550e8400-e29b-41d4-a716-446655440011",
@@ -40,43 +42,40 @@ const sampleUsers = [
     email: "dispatcher@example.com",
     role: "dispatcher" as UserRole,
     avatar: "/javascript-code.png",
-    companyId: "550e8400-e29b-41d4-a716-446655440000", // Using the exact company_id from your DB
+    companyId: "550e8400-e29b-41d4-a716-446655440000",
+  },
+  {
+    id: "550e8400-e29b-41d4-a716-446655440012",
+    name: "Sarah Dispatcher",
+    email: "dispatcher2@example.com",
+    role: "dispatcher" as UserRole,
+    avatar: "/emergency-dispatcher.png",
+    companyId: "550e8400-e29b-41d4-a716-446655440000",
   },
 ]
 
-// Permission mapping
+// Simplified permission mapping for MVP
 const rolePermissions: Record<UserRole, string[]> = {
+  admin: [
+    "*", // All permissions
+  ],
   dispatcher: [
     "view:loads",
-    "assign:drivers",
-    "comment:loads",
-    "view:drivers",
-    "message:drivers",
-    "view:customers",
-    "view:basic_reports",
-    "edit:personal_settings",
-  ],
-  admin: ["*"], // All permissions
-  manager: [
-    "view:loads",
+    "create:loads",
     "edit:loads",
-    "delete:loads",
+    "assign:drivers",
     "view:drivers",
-    "edit:drivers",
     "view:customers",
-    "edit:customers",
-    "view:reports",
-    "edit:settings",
-    "view:financial",
+    "comment:loads",
+    "view:basic_reports",
+    "edit:personal_profile",
   ],
-  accountant: ["view:loads", "view:drivers", "view:customers", "view:reports", "view:financial", "edit:financial"],
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Check for existing session on mount
   useEffect(() => {
     console.log("🔍 AuthProvider: Checking for existing session...")
     const storedUser = localStorage.getItem("user")
@@ -85,20 +84,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const parsedUser = JSON.parse(storedUser)
         console.log("📦 Found stored user:", parsedUser)
 
-        // Ensure the user has companyId
-        if (parsedUser && parsedUser.companyId) {
-          console.log("✅ User has companyId:", parsedUser.companyId)
+        if (parsedUser && parsedUser.companyId && ["admin", "dispatcher"].includes(parsedUser.role)) {
+          console.log("✅ Valid user found:", parsedUser.role)
           setUser(parsedUser)
         } else {
-          console.log("❌ Stored user missing companyId, clearing...")
+          console.log("❌ Invalid stored user, clearing...")
           localStorage.removeItem("user")
         }
       } catch (e) {
         console.error("❌ Failed to parse stored user:", e)
         localStorage.removeItem("user")
       }
-    } else {
-      console.log("📭 No stored user found")
     }
     setIsLoading(false)
   }, [])
@@ -108,30 +104,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true)
 
     try {
-      // Try sample users first for demo
+      // Try sample users first for MVP demo
       const foundSampleUser = sampleUsers.find((u) => u.email === email)
       if (foundSampleUser) {
         console.log("✅ Found sample user:", foundSampleUser)
-
-        if (!foundSampleUser.companyId) {
-          throw new Error("Sample user missing company information")
-        }
-
         setUser(foundSampleUser)
         localStorage.setItem("user", JSON.stringify(foundSampleUser))
-        console.log("💾 Saved sample user to localStorage")
         return
       }
 
       // Fallback to Supabase authentication
-      console.log("🔍 Trying Supabase authentication...")
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
 
       if (authError) {
-        console.error("❌ Supabase auth failed:", authError)
         throw new Error("Invalid credentials")
       }
 
@@ -143,13 +131,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .single()
 
       if (profileError || !profile) {
-        console.error("❌ Profile fetch failed:", profileError)
         throw new Error("User profile not found")
       }
 
       if (!profile.company_id) {
-        console.error("❌ User profile missing company_id")
         throw new Error("User account is not associated with a company")
+      }
+
+      if (!["admin", "dispatcher"].includes(profile.role)) {
+        throw new Error("Invalid user role for this system")
       }
 
       const authenticatedUser: User = {
@@ -158,10 +148,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: profile.email,
         role: profile.role as UserRole,
         avatar: profile.avatar_url || undefined,
-        companyId: profile.company_id, // Convert snake_case to camelCase
+        companyId: profile.company_id,
       }
 
-      console.log("✅ Supabase user authenticated:", authenticatedUser)
       setUser(authenticatedUser)
       localStorage.setItem("user", JSON.stringify(authenticatedUser))
     } catch (error) {
@@ -186,8 +175,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return userPermissions.includes(permission)
   }
 
+  const isAdmin = () => user?.role === "admin"
+  const isDispatcher = () => user?.role === "dispatcher"
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout, hasPermission }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, hasPermission, isAdmin, isDispatcher }}>
+      {children}
+    </AuthContext.Provider>
   )
 }
 

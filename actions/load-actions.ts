@@ -1,227 +1,85 @@
-"use server"
-
-import { supabase } from "@/lib/supabase-client"
+import { createServerActionClient } from "@supabase/auth-helpers-nextjs"
+import { cookies } from "next/headers"
 import { revalidatePath } from "next/cache"
+import type { Database } from "@/types/supabase"
+import type { Load, LoadInsert, LoadUpdate } from "@/types/database"
 
-interface CreateLoadInput {
-  customer_name: string
-  company_id: string
-  load_number?: string
-  pickup_location?: string
-  delivery_location?: string
-  pickup_datetime?: string
-  delivery_datetime?: string
-  status?: string
-  rate?: number
-  miles?: number
-  weight?: number
-  commodity?: string
-  equipment_type?: string
-  special_instructions_pickup?: string
-  special_instructions_delivery?: string
-  special_instructions_general?: string
-  broker_email?: string
-  broker_phone?: string
-  dispatcher_id?: string
-  vin_number?: string
-  [key: string]: any // Allow additional properties
+const getSupabase = () => {
+  const cookieStore = cookies()
+  return createServerActionClient<Database>({ cookies: () => cookieStore })
 }
 
-export async function createLoad(input: CreateLoadInput) {
-  console.log("🚀 Server Action: createLoad called with:", input)
-
-  if (!input.company_id) {
-    console.error("❌ Missing company_id in createLoad")
-    throw new Error("Company ID is required to create a load")
-  }
-
-  if (!input.customer_name?.trim()) {
-    console.error("❌ Missing customer_name in createLoad")
-    throw new Error("Customer name is required")
-  }
+export async function createLoad(load: LoadInsert) {
+  const supabase = getSupabase()
 
   try {
-    // 1. Find or create customer
-    let customerIdToUse: string
-
-    const { data: existingCustomer, error: customerError } = await supabase
-      .from("customers")
-      .select("id")
-      .eq("name", input.customer_name)
-      .eq("company_id", input.company_id)
-      .maybeSingle()
-
-    if (customerError) {
-      console.error("❌ Error fetching customer:", customerError)
-      throw new Error(`Failed to check for existing customer: ${customerError.message}`)
-    }
-
-    if (existingCustomer) {
-      console.log("✅ Found existing customer:", existingCustomer.id)
-      customerIdToUse = existingCustomer.id
-    } else {
-      console.log("🆕 Creating new customer")
-      // Create new customer
-      const newCustomerData = {
-        name: input.customer_name,
-        company_id: input.company_id,
-        email: input.broker_email || null,
-        phone: input.broker_phone || null,
-      }
-
-      const { data: newCustomer, error: newCustomerError } = await supabase
-        .from("customers")
-        .insert(newCustomerData)
-        .select("id")
-        .single()
-
-      if (newCustomerError || !newCustomer) {
-        console.error("❌ Error creating new customer:", newCustomerError)
-        throw new Error(`Failed to create new customer: ${newCustomerError?.message || "Unknown error"}`)
-      }
-
-      console.log("✅ Created new customer:", newCustomer.id)
-      customerIdToUse = newCustomer.id
-    }
-
-    // 2. Prepare load data
-    const finalLoadData = {
-      ...input,
-      customer_id: customerIdToUse,
-      load_number: input.load_number || `LOAD-${Date.now().toString().slice(-6)}`,
-      status: input.status || "new",
-      created_at: new Date().toISOString(),
-    }
-
-    // Remove customer_name as it's not a field in the loads table
-    delete finalLoadData.customer_name
-
-    // 3. Insert the load
-    console.log("📝 Inserting load with data:", finalLoadData)
-    const { data: newLoad, error: loadError } = await supabase.from("loads").insert(finalLoadData).select().single()
-
-    if (loadError) {
-      console.error("❌ Error inserting load:", loadError)
-      throw new Error(`Failed to create load: ${loadError.message}`)
-    }
-
-    console.log("✅ Load created successfully:", newLoad)
-    revalidatePath("/dashboard/loads")
-    return newLoad
-  } catch (error: any) {
-    console.error("❌ Error in createLoad:", error)
-    throw error
-  }
-}
-
-export interface Load {
-  id: string
-  load_number: string
-  customer_id: string
-  pickup_location?: string
-  delivery_location?: string
-  pickup_datetime?: string
-  delivery_datetime?: string
-  status: string
-  rate?: number
-  miles?: number
-  weight?: number
-  commodity?: string
-  equipment_type?: string
-  special_instructions_pickup?: string
-  special_instructions_delivery?: string
-  special_instructions_general?: string
-  broker_email?: string
-  broker_phone?: string
-  dispatcher_id?: string
-  vin_number?: string
-  company_id: string
-  created_at: string
-  updated_at?: string
-  customers?: {
-    name: string
-  }
-  drivers?: {
-    first_name: string
-    last_name: string
-  }
-}
-
-export interface Driver {
-  id: string
-  first_name: string
-  last_name: string
-  email?: string
-  phone?: string
-  license_number?: string
-  company_id: string
-}
-
-export async function getLoads(): Promise<Load[]> {
-  try {
-    const { data, error } = await supabase
-      .from("loads")
-      .select(`
-        *,
-        customers (name),
-        drivers (first_name, last_name)
-      `)
-      .order("created_at", { ascending: false })
+    const { data, error } = await supabase.from("load").insert([load]).select().single()
 
     if (error) {
-      console.error("Error fetching loads:", error)
-      throw new Error(`Failed to fetch loads: ${error.message}`)
+      console.error("Error creating load:", error)
+      return { error: error.message }
     }
 
-    return data || []
-  } catch (error: any) {
-    console.error("Error in getLoads:", error)
-    throw error
+    revalidatePath("/loads")
+    return { data }
+  } catch (error) {
+    console.error("Unexpected error creating load:", error)
+    return { error: "An unexpected error occurred." }
   }
 }
 
-export async function getDrivers(): Promise<Driver[]> {
+export async function updateLoad(id: string, load: LoadUpdate) {
+  const supabase = getSupabase()
+
   try {
-    const { data, error } = await supabase.from("drivers").select("*").order("first_name", { ascending: true })
+    const { data, error } = await supabase.from("load").update(load).eq("id", id).select().single()
 
     if (error) {
-      console.error("Error fetching drivers:", error)
-      throw new Error(`Failed to fetch drivers: ${error.message}`)
+      console.error("Error updating load:", error)
+      return { error: error.message }
     }
 
-    return data || []
-  } catch (error: any) {
-    console.error("Error in getDrivers:", error)
-    throw error
+    revalidatePath("/loads")
+    return { data }
+  } catch (error) {
+    console.error("Unexpected error updating load:", error)
+    return { error: "An unexpected error occurred." }
   }
 }
 
-export async function assignDriverToLoad({ loadId, driverId }: { loadId: string; driverId: string }) {
-  try {
-    console.log("🚀 Assigning driver to load:", { loadId, driverId })
+export async function deleteLoad(id: string) {
+  const supabase = getSupabase()
 
-    // Update the load with the assigned driver
-    const { data, error } = await supabase
-      .from("loads")
-      .update({
-        driver_id: driverId,
-        status: "assigned",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", loadId)
-      .select()
-      .single()
+  try {
+    const { error } = await supabase.from("load").delete().eq("id", id)
 
     if (error) {
-      console.error("❌ Error assigning driver to load:", error)
-      throw new Error(`Failed to assign driver: ${error.message}`)
+      console.error("Error deleting load:", error)
+      return { error: error.message }
     }
 
-    console.log("✅ Driver assigned successfully:", data)
-    revalidatePath("/dashboard/loads")
-    return data
-  } catch (error: any) {
-    console.error("❌ Error in assignDriverToLoad:", error)
-    throw error
+    revalidatePath("/loads")
+    return { data: { id } }
+  } catch (error) {
+    console.error("Unexpected error deleting load:", error)
+    return { error: "An unexpected error occurred." }
+  }
+}
+
+export async function getLoadById(id: string): Promise<{ data: Load | null; error: string | null }> {
+  const supabase = getSupabase()
+
+  try {
+    const { data, error } = await supabase.from("load").select("*").eq("id", id).single()
+
+    if (error) {
+      console.error("Error fetching load by ID:", error)
+      return { data: null, error: error.message }
+    }
+
+    return { data: data as Load, error: null }
+  } catch (error) {
+    console.error("Unexpected error fetching load by ID:", error)
+    return { data: null, error: "An unexpected error occurred." }
   }
 }

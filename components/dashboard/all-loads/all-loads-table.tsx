@@ -115,9 +115,9 @@ export function AllLoadsTable() {
 
   const isManagerOrAdmin = user?.role === "manager" || user?.role === "admin"
 
-  const filteredLoads = loads.filter((load) => {
+  const filteredLoads = (loads || []).filter((load) => {
     // Filter by tab
-    if (activeTab !== "all" && load.status.toLowerCase() !== activeTab.toLowerCase()) {
+    if (activeTab !== "all" && load?.status?.toLowerCase() !== activeTab.toLowerCase()) {
       return false
     }
 
@@ -125,10 +125,10 @@ export function AllLoadsTable() {
     if (searchQuery) {
       const query = searchQuery.toLowerCase()
       return (
-        load.id.toLowerCase().includes(query) ||
-        load.origin.toLowerCase().includes(query) ||
-        load.destination.toLowerCase().includes(query) ||
-        load.dispatcher.toLowerCase().includes(query)
+        load?.id?.toLowerCase().includes(query) ||
+        load?.origin?.toLowerCase().includes(query) ||
+        load?.destination?.toLowerCase().includes(query) ||
+        load?.dispatcher?.toLowerCase().includes(query)
       )
     }
 

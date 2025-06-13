@@ -90,10 +90,10 @@ export function DriverRPMReport() {
   )
   const { toast } = useToast()
 
-  const filteredData = driverRPMData.filter(
+  const filteredData = (driverRPMData || []).filter(
     (driver) =>
-      driver.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      driver.id.toLowerCase().includes(searchTerm.toLowerCase()),
+      driver?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      driver?.id?.toLowerCase().includes(searchTerm.toLowerCase()),
   )
 
   const handleExport = (format: "xlsx" | "csv" | "pdf") => {

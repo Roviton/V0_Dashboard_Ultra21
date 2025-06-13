@@ -22,15 +22,15 @@ export default function DashboardPage() {
   const [statusFilter, setStatusFilter] = useState("active")
 
   const {
-    loads,
-    loading,
-    error,
+    loads = [],
+    loading = false,
+    error = null,
     updateLoadStatus,
     assignDriver,
     refetch: refetchLoads,
   } = useLoads({
     viewMode: statusFilter,
-  })
+  }) || {}
 
   const { user, loading: authLoading } = useAuth()
   const router = useRouter()
@@ -95,18 +95,20 @@ export default function DashboardPage() {
     }
   }
 
-  const filteredLoads = loads.filter((load) => {
+  const filteredLoads = (loads || []).filter((load) => {
     if (!searchTerm) return true
     const lowerSearchTerm = searchTerm.toLowerCase()
     const customerName =
-      typeof load.customer === "object" && load.customer !== null ? load.customer.name : String(load.customer)
+      typeof load?.customer === "object" && load?.customer !== null
+        ? load.customer.name || ""
+        : String(load?.customer || "")
 
     return (
-      load.load_number?.toLowerCase().includes(lowerSearchTerm) ||
-      load.reference_number?.toLowerCase().includes(lowerSearchTerm) ||
+      load?.load_number?.toLowerCase().includes(lowerSearchTerm) ||
+      load?.reference_number?.toLowerCase().includes(lowerSearchTerm) ||
       customerName?.toLowerCase().includes(lowerSearchTerm) ||
-      load.pickup_city?.toLowerCase().includes(lowerSearchTerm) ||
-      load.delivery_city?.toLowerCase().includes(lowerSearchTerm)
+      load?.pickup_city?.toLowerCase().includes(lowerSearchTerm) ||
+      load?.delivery_city?.toLowerCase().includes(lowerSearchTerm)
     )
   })
 
@@ -143,7 +145,7 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      <DashboardStats loads={loads} loading={loading} />
+      <DashboardStats loads={loads || []} loading={loading || false} />
 
       <div>
         <Card>
@@ -184,9 +186,9 @@ export default function DashboardPage() {
               </div>
             ) : (
               <LoadsDataTable
-                loads={filteredLoads}
-                loading={loading && loads.length === 0}
-                error={error}
+                loads={filteredLoads || []}
+                loading={loading || false}
+                error={error || null}
                 onUpdateStatus={updateLoadStatus}
                 onAssignDriver={handleAssignDriver}
               />

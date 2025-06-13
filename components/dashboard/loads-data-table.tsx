@@ -87,7 +87,7 @@ interface Load {
 }
 
 interface LoadsDataTableProps {
-  loads: Load[]
+  loads?: Load[]
   loading?: boolean
   error?: string | null
   onUpdateStatus?: (loadId: string, status: string) => void
@@ -126,6 +126,7 @@ export function LoadsDataTable({
   const [sorting, setSorting] = useState<SortingState>([])
   const [canvasCreationAttempts, setCanvasCreationAttempts] = useState<Map<string, number>>(new Map())
   const maxCanvasAttempts = 5
+  const [searchTerm, setSearchTerm] = useState<string>("")
 
   // Load PDF.js when component mounts
   useEffect(() => {
@@ -1343,7 +1344,7 @@ export function LoadsDataTable({
             ))}
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows.length > 0 ? (
+            {table.getRowModel().rows?.length > 0 ? (
               table.getRowModel().rows.map((row) => (
                 <Fragment key={row.id}>
                   <TableRow
@@ -1365,7 +1366,7 @@ export function LoadsDataTable({
             ) : (
               <TableRow>
                 <TableCell colSpan={columns.length} className="h-24 text-center">
-                  No loads found.
+                  {loading ? "Loading loads..." : "No loads found."}
                 </TableCell>
               </TableRow>
             )}
