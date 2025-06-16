@@ -11,8 +11,9 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Truck, Building2, User, CheckCircle, AlertCircle } from "lucide-react"
+import { Truck, Building2, User, CheckCircle, AlertCircle, Mail } from "lucide-react"
 import { supabase } from "@/lib/supabase-client"
+import { config } from "@/lib/config"
 
 interface CompanyFormData {
   // Company Information
@@ -52,6 +53,7 @@ export default function CompanyRegistrationPage() {
   const [errors, setErrors] = useState<FormErrors>({})
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
+  const [emailConfirmationSent, setEmailConfirmationSent] = useState(false)
   const router = useRouter()
 
   const clearErrors = () => setErrors({})
@@ -165,8 +167,10 @@ export default function CompanyRegistrationPage() {
 
     try {
       console.log("🚀 Starting company registration process...")
+      console.log("🌍 Environment:", process.env.NODE_ENV)
+      console.log("🔗 Redirect URL will be:", config.authRedirectUrl)
 
-      // Step 1: Create Supabase Auth user account
+      // Step 1: Create Supabase Auth user account with email confirmation
       console.log("📝 Creating Supabase Auth user...")
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.adminEmail,
@@ -175,7 +179,10 @@ export default function CompanyRegistrationPage() {
           data: {
             full_name: formData.adminName,
             phone: formData.adminPhone,
+            role: "admin",
+            company_name: formData.companyName,
           },
+          emailRedirectTo: config.authRedirectUrl, // Use config instead of hardcoded URL
         },
       })
 
@@ -221,42 +228,57 @@ export default function CompanyRegistrationPage() {
 
       if (companyError) {
         console.error("❌ Company creation error:", companyError)
-        setErrors({ general: "Failed to create company record. Please try again." })
+        setErrors({ general: `Failed to create company record: ${companyError.message}` })
         setLoading(false)
         return
       }
 
       console.log("✅ Company created:", companyData.id)
 
-      // Step 3: Create user profile record
+      // Step 3: Create user profile record (CRITICAL FIX)
       console.log("👤 Creating user profile...")
-      const { error: userError } = await supabase.from("users").insert({
-        id: authData.user.id, // Use Supabase Auth user ID
-        company_id: companyData.id,
-        email: formData.adminEmail,
-        name: formData.adminName,
-        role: "admin",
-        phone: formData.adminPhone,
-        is_active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
+      const { data: userProfile, error: userError } = await supabase
+        .from("users")
+        .insert({
+          id: authData.user.id, // Use Supabase Auth user ID
+          company_id: companyData.id,
+          email: formData.adminEmail,
+          name: formData.adminName,
+          role: "admin",
+          phone: formData.adminPhone,
+          is_active: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single()
 
       if (userError) {
         console.error("❌ User profile creation error:", userError)
-        setErrors({ general: "Failed to create user profile. Please contact support." })
+        setErrors({ general: `Failed to create user profile: ${userError.message}. Please contact support.` })
+
+        // TODO: Consider cleanup - delete auth user and company if profile creation fails
         setLoading(false)
         return
       }
 
-      console.log("✅ User profile created successfully")
+      console.log("✅ User profile created:", userProfile.id)
 
-      // Step 4: Success! User is already authenticated by Supabase
+      // Step 4: Handle email confirmation flow
+      if (!authData.session) {
+        console.log("📧 Email confirmation required")
+        setEmailConfirmationSent(true)
+        setLoading(false)
+        return
+      }
+
+      // Step 5: Success! User is already authenticated by Supabase
+      console.log("🎉 Registration completed successfully!")
       setSuccess(true)
 
       // Wait a moment to show success message, then redirect
       setTimeout(() => {
-        router.push("/dashboard?welcome=true")
+        router.push("/dashboard/admin?welcome=true")
       }, 2000)
     } catch (error) {
       console.error("❌ Unexpected registration error:", error)
@@ -266,6 +288,43 @@ export default function CompanyRegistrationPage() {
   }
 
   const passwordStrength = getPasswordStrength(formData.password)
+
+  if (emailConfirmationSent) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <Card className="w-full max-w-md shadow-xl border-0">
+          <CardContent className="text-center p-8">
+            <div className="mb-6">
+              <Mail className="h-16 w-16 text-blue-600 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Check Your Email</h2>
+              <p className="text-gray-600 mb-4">
+                We've sent a confirmation email to <strong>{formData.adminEmail}</strong>
+              </p>
+              <p className="text-sm text-gray-500">
+                Click the link in the email to complete your registration and access your dashboard.
+              </p>
+              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-sm text-yellow-800">
+                  <strong>Note:</strong> If you received a localhost link, please replace "localhost:3000" with
+                  "ultra21.com" in the URL.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <Link href="/auth/signin">
+                <Button variant="outline" className="w-full">
+                  Back to Sign In
+                </Button>
+              </Link>
+              <p className="text-xs text-gray-400">
+                Didn't receive the email? Check your spam folder or contact support.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   if (success) {
     return (
@@ -291,20 +350,22 @@ export default function CompanyRegistrationPage() {
       <div className="w-full max-w-2xl">
         {/* Header */}
         <div className="text-center mb-8">
-          <div className="flex items-center justify-center mb-4">
-            <div className="relative group">
-              <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-blue-800 rounded-lg blur opacity-20 group-hover:opacity-30 transition duration-500"></div>
-              <div className="relative bg-gradient-to-r from-blue-600 to-blue-800 rounded-lg p-3 transform group-hover:scale-105 transition duration-200">
-                <Truck className="h-8 w-8 text-white" />
+          <Link href="/" className="inline-block">
+            <div className="flex items-center justify-center mb-4">
+              <div className="relative group">
+                <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-blue-800 rounded-lg blur opacity-20 group-hover:opacity-30 transition duration-500"></div>
+                <div className="relative bg-gradient-to-r from-blue-600 to-blue-800 rounded-lg p-3 transform group-hover:scale-105 transition duration-200">
+                  <Truck className="h-8 w-8 text-white" />
+                </div>
+              </div>
+              <div className="ml-3">
+                <div className="text-3xl font-black text-gray-900">
+                  Ultra<span className="text-blue-600 font-extrabold">21</span>
+                </div>
+                <div className="text-xs text-gray-600 font-medium tracking-wide">Freight Solutions</div>
               </div>
             </div>
-            <div className="ml-3">
-              <div className="text-3xl font-black text-gray-900">
-                Ultra<span className="text-blue-600 font-extrabold">21</span>
-              </div>
-              <div className="text-xs text-gray-600 font-medium tracking-wide">Freight Solutions</div>
-            </div>
-          </div>
+          </Link>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Register Your Company</h1>
           <p className="text-gray-600">
             Join thousands of freight companies using Ultra21 to streamline their operations

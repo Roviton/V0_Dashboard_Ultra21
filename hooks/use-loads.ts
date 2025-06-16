@@ -46,6 +46,7 @@ interface Load {
   pickup_zip?: string | null
   delivery_zip?: string | null
   assigned_by?: string | null
+  company_id?: string | null
 }
 
 export default function useLoads({ viewMode = "active" }: { viewMode?: "active" | "history" | "all" } = {}) {
@@ -56,6 +57,7 @@ export default function useLoads({ viewMode = "active" }: { viewMode?: "active" 
 
   const fetchLoads = useCallback(async () => {
     if (!user?.companyId) {
+      console.log("No company ID found, clearing loads")
       setLoads([])
       setLoading(false)
       return
@@ -64,6 +66,8 @@ export default function useLoads({ viewMode = "active" }: { viewMode?: "active" 
     try {
       setLoading(true)
       setError(null)
+
+      console.log("🔍 Fetching loads for company:", user.companyId)
 
       let query = supabase
         .from("loads")
@@ -76,7 +80,7 @@ export default function useLoads({ viewMode = "active" }: { viewMode?: "active" 
           ),
           assigned_by_user:users!loads_assigned_by_fkey(name, email)
         `)
-        .eq("company_id", user.companyId)
+        .eq("company_id", user.companyId) // CRITICAL: Filter by company_id
 
       // Apply view mode filter
       if (viewMode === "active") {
@@ -95,6 +99,7 @@ export default function useLoads({ viewMode = "active" }: { viewMode?: "active" 
         throw fetchError
       }
 
+      console.log(`✅ Fetched ${data?.length || 0} loads for company ${user.companyId}`)
       setLoads(data || [])
     } catch (err: any) {
       console.error("Error fetching loads:", err)
@@ -105,40 +110,45 @@ export default function useLoads({ viewMode = "active" }: { viewMode?: "active" 
     }
   }, [user?.companyId, viewMode])
 
-  const updateLoadStatus = useCallback(async (loadId: string, status: string) => {
-    try {
-      const { error: updateError } = await supabase
-        .from("loads")
-        .update({ status, updated_at: new Date().toISOString() })
-        .eq("id", loadId)
+  const updateLoadStatus = useCallback(
+    async (loadId: string, status: string) => {
+      try {
+        const { error: updateError } = await supabase
+          .from("loads")
+          .update({ status, updated_at: new Date().toISOString() })
+          .eq("id", loadId)
+          .eq("company_id", user?.companyId) // Ensure company isolation
 
-      if (updateError) {
-        throw updateError
+        if (updateError) {
+          throw updateError
+        }
+
+        // Update local state
+        setLoads((prevLoads) =>
+          prevLoads.map((load) =>
+            load.id === loadId ? { ...load, status, updated_at: new Date().toISOString() } : load,
+          ),
+        )
+
+        return true
+      } catch (err: any) {
+        console.error("Error updating load status:", err)
+        throw err
       }
-
-      // Update local state
-      setLoads((prevLoads) =>
-        prevLoads.map((load) =>
-          load.id === loadId ? { ...load, status, updated_at: new Date().toISOString() } : load,
-        ),
-      )
-
-      return true
-    } catch (err: any) {
-      console.error("Error updating load status:", err)
-      throw err
-    }
-  }, [])
+    },
+    [user?.companyId],
+  )
 
   const assignDriver = async (loadId: string, driverId: string) => {
     try {
-      console.log("Assigning driver:", { loadId, driverId, assignedBy: user?.id })
+      console.log("Assigning driver:", { loadId, driverId, assignedBy: user?.id, companyId: user?.companyId })
 
-      // First, check if the driver exists and is active
+      // First, check if the driver exists and belongs to the same company
       const { data: driverData, error: driverError } = await supabase
         .from("drivers")
-        .select("id, name, status, is_active")
+        .select("id, name, status, is_active, company_id")
         .eq("id", driverId)
+        .eq("company_id", user?.companyId) // Ensure driver belongs to same company
         .single()
 
       if (driverError) {
@@ -152,7 +162,7 @@ export default function useLoads({ viewMode = "active" }: { viewMode?: "active" 
 
       console.log("Driver data:", driverData)
 
-      // Try the simplified assignment function first
+      // Try the simplified assignment function with company isolation
       const { error: assignError } = await supabase.rpc("assign_driver_to_load_simple", {
         p_load_id: loadId,
         p_driver_id: driverId,

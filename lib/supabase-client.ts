@@ -1,20 +1,13 @@
-import { createClient } from "@supabase/supabase-js"
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
 import type { Database } from "@/types/database"
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+// Create a single instance of the Supabase client for client-side use
+export const supabase = createClientComponentClient<Database>()
 
-// Create a singleton instance of the Supabase client
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey)
-
-// Type helpers for database tables
-export type Tables<T extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][T]["Row"]
-export type InsertTables<T extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][T]["Insert"]
-export type UpdateTables<T extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][T]["Update"]
-
-// Specific types for common use
-export type Company = Tables<"companies">
-export type User = Tables<"users">
-export type Driver = Tables<"drivers">
-export type Load = Tables<"loads">
-export type Customer = Tables<"customers">
+// Log configuration for debugging
+if (typeof window !== "undefined") {
+  console.log("🔧 Supabase Client Configuration:")
+  console.log("- Environment:", process.env.NODE_ENV)
+  console.log("- Supabase URL:", process.env.NEXT_PUBLIC_SUPABASE_URL)
+  console.log("- Current Origin:", window.location.origin)
+}

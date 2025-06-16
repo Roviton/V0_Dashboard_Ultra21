@@ -105,6 +105,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(authenticatedUser)
           setIsLoading(false)
           return
+        } else {
+          console.log("⚠️ Supabase session exists but no profile found, signing out...")
+          await supabase.auth.signOut()
         }
       }
 
@@ -156,6 +159,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.log("✅ User signed in:", authenticatedUser.role)
           setUser(authenticatedUser)
           localStorage.removeItem("user") // Clear demo user if any
+        } else {
+          console.log("⚠️ User signed in but no profile found, signing out...")
+          await supabase.auth.signOut()
         }
       } else if (event === "SIGNED_OUT") {
         console.log("🚪 User signed out")
@@ -183,12 +189,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // Real Supabase authentication for production users
+      console.log("🔍 Attempting Supabase authentication...")
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
 
       if (authError) {
+        console.error("❌ Supabase auth error:", authError)
         throw new Error("Invalid email or password")
       }
 
@@ -196,24 +204,71 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error("Authentication failed")
       }
 
-      // Get user profile from database
+      console.log("✅ Supabase Auth successful, fetching profile...")
+
+      // Enhanced debugging for profile lookup
+      console.log("🔍 Auth user details:", {
+        id: authData.user.id,
+        email: authData.user.email,
+        email_confirmed_at: authData.user.email_confirmed_at,
+        created_at: authData.user.created_at,
+      })
+
+      // Get user profile from database with company info
       const { data: profile, error: profileError } = await supabase
         .from("users")
-        .select("*")
+        .select(`
+        id, name, email, role, company_id, phone, avatar_url, is_active,
+        companies(id, name, dot_number, mc_number)
+      `)
         .eq("id", authData.user.id)
         .single()
 
+      if (profileError) {
+        console.error("❌ Profile query failed:", {
+          error: profileError,
+          code: profileError.code,
+          message: profileError.message,
+          details: profileError.details,
+        })
+      } else if (!profile) {
+        console.error("❌ Profile query returned null/undefined")
+      } else {
+        console.log("✅ Profile query successful:", {
+          id: profile.id,
+          email: profile.email,
+          role: profile.role,
+          company_id: profile.company_id,
+          is_active: profile.is_active,
+        })
+      }
+
       if (profileError || !profile) {
-        throw new Error("User profile not found. Please contact support.")
+        console.error("❌ Profile lookup error:", profileError)
+
+        // Check if this is a newly registered user who hasn't completed the profile setup
+        if (authData.user.email_confirmed_at) {
+          // User confirmed email but profile doesn't exist - this might be a registration in progress
+          throw new Error("Account setup incomplete. Please contact support or try registering again.")
+        } else {
+          // User exists in auth but no profile and email not confirmed
+          throw new Error("Please check your email to confirm your account before signing in.")
+        }
       }
 
       if (!profile.company_id) {
-        throw new Error("User account is not associated with a company")
+        throw new Error("User account is not associated with a company. Please contact support.")
       }
 
       if (!["admin", "dispatcher"].includes(profile.role)) {
-        throw new Error("Invalid user role for this system")
+        throw new Error("Invalid user role for this system. Please contact support.")
       }
+
+      if (!profile.is_active) {
+        throw new Error("Your account has been deactivated. Please contact your administrator.")
+      }
+
+      console.log("✅ Profile found:", profile.email, "Role:", profile.role)
 
       const authenticatedUser: User = {
         id: profile.id,

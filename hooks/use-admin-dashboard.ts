@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase-client"
+import { useAuth } from "@/contexts/auth-context"
 import { startOfMonth, endOfMonth } from "date-fns"
 
 export type DashboardData = {
@@ -19,23 +20,35 @@ export function useAdminDashboard() {
   const [loading, setLoading] = useState(true)
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { user } = useAuth()
 
   const fetchDashboardData = async () => {
+    if (!user?.companyId) {
+      console.log("No company ID found, clearing dashboard data")
+      setDashboardData(null)
+      setLoading(false)
+      return
+    }
+
     try {
       setLoading(true)
       setError(null)
 
-      // Get total loads count
+      console.log("🔍 Fetching admin dashboard data for company:", user.companyId)
+
+      // Get total loads count for this company only
       const { count: totalLoads, error: loadsError } = await supabase
         .from("loads")
         .select("*", { count: "exact", head: true })
+        .eq("company_id", user.companyId) // CRITICAL: Filter by company
 
       if (loadsError) throw new Error(`Error fetching total loads: ${loadsError.message}`)
 
-      // Get loads with rate and distance for RPM calculation
+      // Get loads with rate and distance for RPM calculation (company filtered)
       const { data: loadsWithRates, error: rpmError } = await supabase
         .from("loads")
         .select("rate, distance")
+        .eq("company_id", user.companyId) // CRITICAL: Filter by company
         .not("rate", "is", null)
         .not("distance", "is", null)
 
@@ -48,26 +61,38 @@ export function useAdminDashboard() {
           : 0
 
       // Get loads needing attention (with admin comments or low rates)
-      const { count: commentsCount, error: commentsError } = await supabase
-        .from("admin_comments")
-        .select("load_id", { count: "exact", head: true })
-        .eq("dispatcher_notified", false)
+      // FIXED: Join with loads table to filter by company_id instead of directly on admin_comments
+      let commentsCount = 0
+      try {
+        const { count, error: commentsError } = await supabase
+          .from("admin_comments")
+          .select("id", { count: "exact", head: true })
+          .eq("dispatcher_notified", false)
+          .in("load_id", supabase.from("loads").select("id").eq("company_id", user.companyId))
 
-      if (commentsError) throw new Error(`Error fetching comments count: ${commentsError.message}`)
+        if (!commentsError) {
+          commentsCount = count || 0
+        } else {
+          console.warn("Could not fetch comments count, defaulting to 0:", commentsError)
+        }
+      } catch (commentsErr) {
+        console.warn("Error in comments query, defaulting count to 0:", commentsErr)
+      }
 
-      // Get low rate loads count (RPM < 2.0)
+      // Get low rate loads count (RPM < 2.0) - company filtered
       const { data: lowRateLoadsData, error: lowRateError } = await supabase
         .from("loads")
         .select("id")
+        .eq("company_id", user.companyId) // CRITICAL: Filter by company
         .not("rate", "is", null)
         .not("distance", "is", null)
         .filter("rate/distance", "lt", 2.0)
 
       if (lowRateError) throw new Error(`Error fetching low rate loads: ${lowRateError.message}`)
 
-      const needsAttention = (commentsCount || 0) + (lowRateLoadsData?.length || 0)
+      const needsAttention = commentsCount + (lowRateLoadsData?.length || 0)
 
-      // Get monthly revenue
+      // Get monthly revenue - company filtered
       const now = new Date()
       const monthStart = startOfMonth(now).toISOString()
       const monthEnd = endOfMonth(now).toISOString()
@@ -75,6 +100,7 @@ export function useAdminDashboard() {
       const { data: monthlyRevenueData, error: revenueError } = await supabase
         .from("loads")
         .select("rate")
+        .eq("company_id", user.companyId) // CRITICAL: Filter by company
         .gte("created_at", monthStart)
         .lte("created_at", monthEnd)
         .not("rate", "is", null)
@@ -83,7 +109,7 @@ export function useAdminDashboard() {
 
       const monthlyRevenue = monthlyRevenueData.reduce((sum, load) => sum + (load.rate || 0), 0)
 
-      // Get low rate loads for attention required section
+      // Get low rate loads for attention required section - company filtered
       const { data: lowRateLoads, error: lowRateLoadsError } = await supabase
         .from("loads")
         .select(
@@ -93,6 +119,7 @@ export function useAdminDashboard() {
           customers(name)
         `,
         )
+        .eq("company_id", user.companyId) // CRITICAL: Filter by company
         .not("rate", "is", null)
         .not("distance", "is", null)
         .filter("rate/distance", "lt", 2.0)
@@ -101,34 +128,51 @@ export function useAdminDashboard() {
       if (lowRateLoadsError) throw new Error(`Error fetching low rate loads details: ${lowRateLoadsError.message}`)
 
       // Get loads with admin comments needing dispatcher response
-      const { data: pendingComments, error: pendingCommentsError } = await supabase
-        .from("admin_comments")
-        .select(
-          `
-          id,
-          load_id,
-          loads(load_number),
-          users!admin_id(name),
-          priority,
-          created_at
-        `,
-        )
-        .eq("dispatcher_notified", false)
-        .limit(5)
+      // FIXED: Join with loads table to filter by company_id
+      let pendingComments = []
+      try {
+        const { data: commentsData, error: pendingCommentsError } = await supabase
+          .from("admin_comments")
+          .select(
+            `
+            id,
+            load_id,
+            loads!inner(load_number, company_id),
+            users!admin_id(name),
+            priority,
+            created_at
+          `,
+          )
+          .eq("dispatcher_notified", false)
+          .eq("loads.company_id", user.companyId) // Filter by company through loads table
+          .limit(5)
 
-      if (pendingCommentsError) throw new Error(`Error fetching pending comments: ${pendingCommentsError.message}`)
+        if (!pendingCommentsError && commentsData) {
+          pendingComments = commentsData.map((comment) => ({
+            id: comment.id,
+            load_id: comment.load_id,
+            load_number: comment.loads?.load_number,
+            admin_name: comment.users?.name,
+            priority: comment.priority,
+            created_at: comment.created_at,
+          }))
+        }
+      } catch (commentsErr) {
+        console.warn("Error fetching pending comments, defaulting to empty array:", commentsErr)
+      }
 
-      // Get delayed loads
+      // Get delayed loads - company filtered
       const { data: delayedLoads, error: delayedLoadsError } = await supabase
         .from("loads")
         .select("id, load_number, delivery_date, status, customers(name)")
+        .eq("company_id", user.companyId) // CRITICAL: Filter by company
         .lt("delivery_date", new Date().toISOString())
         .not("status", "in", "(completed,cancelled)")
         .limit(5)
 
       if (delayedLoadsError) throw new Error(`Error fetching delayed loads: ${delayedLoadsError.message}`)
 
-      // Get dispatcher performance
+      // Get dispatcher performance - company filtered
       const { data: dispatcherPerformance, error: dispatcherError } = await supabase
         .from("users")
         .select(
@@ -144,6 +188,7 @@ export function useAdminDashboard() {
         `,
         )
         .eq("role", "dispatcher")
+        .eq("company_id", user.companyId) // CRITICAL: Filter by company
         .limit(5)
 
       if (dispatcherError) throw new Error(`Error fetching dispatcher performance: ${dispatcherError.message}`)
@@ -172,6 +217,13 @@ export function useAdminDashboard() {
         })
         .sort((a, b) => b.avgRPM - a.avgRPM)
 
+      console.log(`✅ Fetched dashboard data for company ${user.companyId}:`, {
+        totalLoads: totalLoads || 0,
+        averageRPM,
+        needsAttention,
+        monthlyRevenue,
+      })
+
       setDashboardData({
         totalLoads: totalLoads || 0,
         averageRPM,
@@ -193,7 +245,7 @@ export function useAdminDashboard() {
   useEffect(() => {
     fetchDashboardData()
 
-    // Set up real-time subscriptions
+    // Set up real-time subscriptions with company filtering
     const loadsSubscription = supabase
       .channel("loads-changes")
       .on(
@@ -202,21 +254,7 @@ export function useAdminDashboard() {
           event: "*",
           schema: "public",
           table: "loads",
-        },
-        () => {
-          fetchDashboardData()
-        },
-      )
-      .subscribe()
-
-    const commentsSubscription = supabase
-      .channel("comments-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "admin_comments",
+          filter: `company_id=eq.${user?.companyId}`, // Filter real-time updates by company
         },
         () => {
           fetchDashboardData()
@@ -226,9 +264,8 @@ export function useAdminDashboard() {
 
     return () => {
       supabase.removeChannel(loadsSubscription)
-      supabase.removeChannel(commentsSubscription)
     }
-  }, [])
+  }, [user?.companyId])
 
   return { dashboardData, loading, error, refetch: fetchDashboardData }
 }
