@@ -51,10 +51,10 @@ export default function HomePage() {
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <Link href="/login">
+              <Link href="/auth/signin">
                 <Button variant="outline">Sign In</Button>
               </Link>
-              <Link href="/login">
+              <Link href="/auth/register/company">
                 <Button>Get Started</Button>
               </Link>
             </div>
@@ -74,7 +74,7 @@ export default function HomePage() {
               Increase efficiency and reduce operational costs.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link href="/login">
+              <Link href="/auth/register/company">
                 <Button size="lg" className="w-full sm:w-auto">
                   Start Free Trial
                   <ArrowRight className="ml-2 h-5 w-5" />
@@ -284,7 +284,7 @@ export default function HomePage() {
             Join hundreds of freight companies that trust Ultra21 to manage their operations efficiently.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link href="/login">
+            <Link href="/auth/register/company">
               <Button size="lg" className="w-full sm:w-auto">
                 Start Your Free Trial
                 <ArrowRight className="ml-2 h-5 w-5" />

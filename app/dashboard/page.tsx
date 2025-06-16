@@ -32,7 +32,7 @@ export default function DashboardPage() {
     viewMode: statusFilter,
   }) || {}
 
-  const { user, loading: authLoading } = useAuth()
+  const { user, isLoading: authLoading } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
   const { toast } = useToast()
@@ -45,6 +45,7 @@ export default function DashboardPage() {
           router.push("/dashboard/admin")
         }
       }
+      // Dispatchers stay on /dashboard - no redirect needed
     }
   }, [user, authLoading, router, pathname])
 

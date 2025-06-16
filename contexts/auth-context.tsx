@@ -78,25 +78,93 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     console.log("🔍 AuthProvider: Checking for existing session...")
-    const storedUser = localStorage.getItem("user")
-    if (storedUser) {
-      try {
-        const parsedUser = JSON.parse(storedUser)
-        console.log("📦 Found stored user:", parsedUser)
 
-        if (parsedUser && parsedUser.companyId && ["admin", "dispatcher"].includes(parsedUser.role)) {
-          console.log("✅ Valid user found:", parsedUser.role)
-          setUser(parsedUser)
-        } else {
-          console.log("❌ Invalid stored user, clearing...")
+    // Check for Supabase session first
+    const checkSupabaseSession = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      if (session?.user) {
+        console.log("📦 Found Supabase session:", session.user.id)
+
+        // Get user profile from database
+        const { data: profile, error } = await supabase.from("users").select("*").eq("id", session.user.id).single()
+
+        if (profile && !error) {
+          const authenticatedUser: User = {
+            id: profile.id,
+            name: profile.name,
+            email: profile.email,
+            role: profile.role as UserRole,
+            avatar: profile.avatar_url || undefined,
+            companyId: profile.company_id,
+          }
+
+          console.log("✅ Supabase user authenticated:", authenticatedUser.role)
+          setUser(authenticatedUser)
+          setIsLoading(false)
+          return
+        }
+      }
+
+      // Fallback to localStorage for demo users
+      const storedUser = localStorage.getItem("user")
+      if (storedUser) {
+        try {
+          const parsedUser = JSON.parse(storedUser)
+          console.log("📦 Found stored demo user:", parsedUser)
+
+          if (parsedUser && parsedUser.companyId && ["admin", "dispatcher"].includes(parsedUser.role)) {
+            console.log("✅ Valid demo user found:", parsedUser.role)
+            setUser(parsedUser)
+          } else {
+            console.log("❌ Invalid stored user, clearing...")
+            localStorage.removeItem("user")
+          }
+        } catch (e) {
+          console.error("❌ Failed to parse stored user:", e)
           localStorage.removeItem("user")
         }
-      } catch (e) {
-        console.error("❌ Failed to parse stored user:", e)
+      }
+
+      setIsLoading(false)
+    }
+
+    checkSupabaseSession()
+
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("🔄 Auth state changed:", event)
+
+      if (event === "SIGNED_IN" && session?.user) {
+        // Get user profile from database
+        const { data: profile, error } = await supabase.from("users").select("*").eq("id", session.user.id).single()
+
+        if (profile && !error) {
+          const authenticatedUser: User = {
+            id: profile.id,
+            name: profile.name,
+            email: profile.email,
+            role: profile.role as UserRole,
+            avatar: profile.avatar_url || undefined,
+            companyId: profile.company_id,
+          }
+
+          console.log("✅ User signed in:", authenticatedUser.role)
+          setUser(authenticatedUser)
+          localStorage.removeItem("user") // Clear demo user if any
+        }
+      } else if (event === "SIGNED_OUT") {
+        console.log("🚪 User signed out")
+        setUser(null)
         localStorage.removeItem("user")
       }
-    }
-    setIsLoading(false)
+    })
+
+    return () => subscription.unsubscribe()
   }, [])
 
   const login = async (email: string, password: string) => {
@@ -106,32 +174,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       // Try sample users first for MVP demo
       const foundSampleUser = sampleUsers.find((u) => u.email === email)
-      if (foundSampleUser) {
+      if (foundSampleUser && password === "password") {
         console.log("✅ Found sample user:", foundSampleUser)
         setUser(foundSampleUser)
         localStorage.setItem("user", JSON.stringify(foundSampleUser))
+        setIsLoading(false)
         return
       }
 
-      // Fallback to Supabase authentication
+      // Real Supabase authentication for production users
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
 
       if (authError) {
-        throw new Error("Invalid credentials")
+        throw new Error("Invalid email or password")
+      }
+
+      if (!authData.user) {
+        throw new Error("Authentication failed")
       }
 
       // Get user profile from database
       const { data: profile, error: profileError } = await supabase
         .from("users")
         .select("*")
-        .eq("email", email)
+        .eq("id", authData.user.id)
         .single()
 
       if (profileError || !profile) {
-        throw new Error("User profile not found")
+        throw new Error("User profile not found. Please contact support.")
       }
 
       if (!profile.company_id) {
@@ -151,8 +224,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         companyId: profile.company_id,
       }
 
+      console.log("✅ Real user authenticated:", authenticatedUser.role)
       setUser(authenticatedUser)
-      localStorage.setItem("user", JSON.stringify(authenticatedUser))
+      localStorage.removeItem("user") // Clear any demo user data
     } catch (error) {
       console.error("❌ Login failed:", error)
       throw error
@@ -161,11 +235,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const logout = () => {
+  const logout = async () => {
     console.log("🚪 Logging out...")
     setUser(null)
     localStorage.removeItem("user")
-    supabase.auth.signOut()
+    await supabase.auth.signOut()
+
+    // Redirect to the official sign-in page
+    if (typeof window !== "undefined") {
+      window.location.href = "/auth/signin"
+    }
   }
 
   const hasPermission = (permission: string) => {
