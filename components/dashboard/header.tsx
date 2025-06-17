@@ -1,10 +1,8 @@
 "use client"
 
-import { useRouter } from "next/navigation"
-import { useAuth } from "@/contexts/auth-context"
+import { Bell, Search, Settings, User, LogOut, Shield } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { ThemeToggle } from "@/components/theme-toggle"
+import { Input } from "@/components/ui/input"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,185 +11,110 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Bell, LogOut, MessageSquare, Search, Settings, User } from "lucide-react"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import Link from "next/link"
+import { useUser, useClerk } from "@clerk/nextjs"
+import { useRouter } from "next/navigation"
 
 export function Header() {
-  const { user, logout } = useAuth()
+  const { user } = useUser()
+  const { signOut } = useClerk()
   const router = useRouter()
 
-  const handleLogout = () => {
-    logout()
-    router.push("/login")
+  const handleSignOut = async () => {
+    await signOut()
+    router.push("/")
   }
 
-  const getRoleBadgeVariant = (role: string) => {
-    switch (role) {
+  const getUserRole = () => {
+    // You can customize this based on how you store roles in Clerk
+    return (user?.publicMetadata?.role as string) || "dispatcher"
+  }
+
+  const getRoleColor = (role: string) => {
+    switch (role.toLowerCase()) {
       case "admin":
-        return "default"
+        return "bg-red-100 text-red-800"
       case "manager":
-        return "outline"
-      case "accountant":
-        return "secondary"
+        return "bg-purple-100 text-purple-800"
       case "dispatcher":
-        return "outline"
+        return "bg-blue-100 text-blue-800"
+      case "accountant":
+        return "bg-green-100 text-green-800"
       default:
-        return "outline"
+        return "bg-gray-100 text-gray-800"
     }
   }
 
+  const userRole = getUserRole()
+
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-background px-4 md:px-6">
-      <div className="flex items-center gap-2">
-        <Link
-          href="/"
-          className="text-2xl font-black bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent tracking-tight hover:opacity-80 transition-opacity"
-        >
-          Ultra21
-        </Link>
-      </div>
-      <div className="relative ml-4 flex-1 md:grow-0 md:basis-1/3">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input type="search" placeholder="Search loads, drivers..." className="w-full bg-background pl-8 md:w-auto" />
-      </div>
-      <div className="ml-auto flex items-center gap-4">
-        {/* Notifications Dropdown - Only shown for non-admin users */}
-        {user && user.role !== "admin" && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon" className="relative">
-                <Bell className="h-4 w-4" />
-                <Badge className="absolute -right-1 -top-1 h-4 w-4 p-0 text-[10px] flex items-center justify-center">
-                  3
-                </Badge>
-                <span className="sr-only">Notifications</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80">
-              <DropdownMenuLabel>Notifications</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <div className="max-h-80 overflow-auto">
-                <DropdownMenuItem className="cursor-pointer">
-                  <div className="flex flex-col gap-1">
-                    <p className="text-sm font-medium">Driver John accepted load #12345</p>
-                    <p className="text-xs text-muted-foreground">5 minutes ago</p>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem className="cursor-pointer">
-                  <div className="flex flex-col gap-1">
-                    <p className="text-sm font-medium">New load #54321 received</p>
-                    <p className="text-xs text-muted-foreground">20 minutes ago</p>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem className="cursor-pointer">
-                  <div className="flex flex-col gap-1">
-                    <p className="text-sm font-medium">Driver Mike refused load #98765</p>
-                    <p className="text-xs text-muted-foreground">1 hour ago</p>
-                  </div>
-                </DropdownMenuItem>
-              </div>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="cursor-pointer justify-center">
-                <span className="text-sm font-medium">View all notifications</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+    <header className="bg-white border-b border-gray-200 px-6 py-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-4">
+          <h1 className="text-2xl font-bold text-gray-900">Freight Dispatch</h1>
+        </div>
 
-        {/* Messages Dropdown - Only shown for non-admin users */}
-        {user && user.role !== "admin" && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon" className="relative">
-                <MessageSquare className="h-4 w-4" />
-                <Badge className="absolute -right-1 -top-1 h-4 w-4 p-0 text-[10px] flex items-center justify-center">
-                  2
-                </Badge>
-                <span className="sr-only">Messages</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80">
-              <DropdownMenuLabel>Messages</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <div className="max-h-80 overflow-auto">
-                <DropdownMenuItem className="cursor-pointer">
-                  <div className="flex flex-col gap-1">
-                    <p className="text-sm font-medium">Driver Sarah: "Will be 15 min late to pickup"</p>
-                    <p className="text-xs text-muted-foreground">10 minutes ago</p>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem className="cursor-pointer">
-                  <div className="flex flex-col gap-1">
-                    <p className="text-sm font-medium">Driver Tom: "Arrived at delivery location"</p>
-                    <p className="text-xs text-muted-foreground">30 minutes ago</p>
-                  </div>
-                </DropdownMenuItem>
-              </div>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="cursor-pointer justify-center">
-                <span className="text-sm font-medium">View all messages</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+        <div className="flex items-center space-x-4">
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <Input placeholder="Search loads, drivers..." className="pl-10 w-64" />
+          </div>
 
-        <ThemeToggle />
-        {user && (
+          {/* Notifications */}
+          <Button variant="ghost" size="icon" className="relative">
+            <Bell className="h-5 w-5" />
+            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+              3
+            </span>
+          </Button>
+
+          {/* User Menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="relative h-10 w-10 rounded-full">
                 <Avatar className="h-10 w-10">
-                  <AvatarImage src={user.avatar || "/placeholder.svg"} alt={user.name} />
+                  <AvatarImage src={user?.imageUrl || "/placeholder.svg"} alt={user?.fullName || ""} />
                   <AvatarFallback>
-                    {user.name
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")}
+                    {user?.firstName?.[0]}
+                    {user?.lastName?.[0]}
                   </AvatarFallback>
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-56" align="end" forceMount>
-              <DropdownMenuLabel>
-                <div className="flex flex-col space-y-1">
-                  <p className="text-sm font-medium leading-none">{user.name}</p>
-                  <p className="text-xs leading-none text-muted-foreground">{user.email}</p>
-                  <div className="pt-1">
-                    <Badge variant={getRoleBadgeVariant(user.role)} className="mt-1">
-                      {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+              <DropdownMenuLabel className="font-normal">
+                <div className="flex flex-col space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <p className="text-sm font-medium leading-none">{user?.fullName}</p>
+                    <Badge className={`text-xs ${getRoleColor(userRole)}`}>
+                      <Shield className="w-3 h-3 mr-1" />
+                      {userRole}
                     </Badge>
                   </div>
+                  <p className="text-xs leading-none text-muted-foreground">
+                    {user?.primaryEmailAddress?.emailAddress}
+                  </p>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-1">
-                <DropdownMenuItem
-                  onClick={() => router.push("/dashboard/profile")}
-                  className="flex items-center justify-start md:justify-center"
-                >
-                  <User className="mr-2 h-4 w-4 md:mr-0 md:mb-1" />
-                  <span className="md:hidden">Profile</span>
-                  <span className="hidden md:inline md:text-xs md:text-center md:w-full">Profile</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => router.push("/dashboard/settings")}
-                  className="flex items-center justify-start md:justify-center"
-                >
-                  <Settings className="mr-2 h-4 w-4 md:mr-0 md:mb-1" />
-                  <span className="md:hidden">Settings</span>
-                  <span className="hidden md:inline md:text-xs md:text-center md:w-full">Settings</span>
-                </DropdownMenuItem>
-              </div>
+              <DropdownMenuItem onClick={() => router.push("/dashboard/profile")}>
+                <User className="mr-2 h-4 w-4" />
+                <span>Profile</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push("/dashboard/settings")}>
+                <Settings className="mr-2 h-4 w-4" />
+                <span>Settings</span>
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleLogout} className="flex items-center justify-start">
+              <DropdownMenuItem onClick={handleSignOut}>
                 <LogOut className="mr-2 h-4 w-4" />
                 <span>Log out</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        )}
+        </div>
       </div>
     </header>
   )
