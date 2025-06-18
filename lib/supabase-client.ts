@@ -1,13 +1,14 @@
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
+import { createClient } from "@supabase/supabase-js"
 import type { Database } from "@/types/database"
 
-// Create a single instance of the Supabase client for client-side use
-export const supabase = createClientComponentClient<Database>()
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-// Log configuration for debugging
-if (typeof window !== "undefined") {
-  console.log("🔧 Supabase Client Configuration:")
-  console.log("- Environment:", process.env.NODE_ENV)
-  console.log("- Supabase URL:", process.env.NEXT_PUBLIC_SUPABASE_URL)
-  console.log("- Current Origin:", window.location.origin)
-}
+// Create a single instance to avoid multiple client warnings
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true,
+  },
+})

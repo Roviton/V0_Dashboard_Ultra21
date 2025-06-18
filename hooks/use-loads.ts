@@ -77,8 +77,7 @@ export default function useLoads({ viewMode = "active" }: { viewMode?: "active" 
           load_drivers(
             *,
             driver:drivers(*)
-          ),
-          assigned_by_user:users!loads_assigned_by_fkey(name, email)
+          )
         `)
         .eq("company_id", user.companyId) // CRITICAL: Filter by company_id
 

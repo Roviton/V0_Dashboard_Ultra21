@@ -610,102 +610,61 @@ export const EnhancedNewLoadModal = () => {
         throw new Error("Delivery date is required")
       }
 
-      // Find or create customer
-      let customerId: string
-      const { data: existingCustomer, error: customerError } = await supabase
-        .from("customers")
-        .select("id")
-        .eq("name", customerName)
-        .eq("company_id", user.companyId)
-        .maybeSingle()
+      // Use server action to create customer and load (bypasses RLS)
+      const response = await fetch("/api/loads/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          customerName,
+          companyId: user.companyId,
+          userId: user.id,
+          loadData: {
+            load_number: loadNumber,
+            reference_number: referenceNumber,
+            pickup_address: pickupAddress,
+            pickup_city: pickupCity,
+            pickup_state: pickupState,
+            pickup_zip: pickupZip || null,
+            pickup_date: pickupDate,
+            pickup_time: pickupTime || null,
+            pickup_contact_name: pickupContactName || null,
+            pickup_contact_phone: pickupContactPhone || null,
+            pickup_operating_hours: pickupHours || null,
+            delivery_address: deliveryAddress,
+            delivery_city: deliveryCity,
+            delivery_state: deliveryState,
+            delivery_zip: deliveryZip || null,
+            delivery_date: deliveryDate,
+            delivery_time: deliveryTime || null,
+            rate: rate,
+            distance: distance,
+            weight: weight,
+            commodity: commodity || null,
+            special_instructions: specialInstructions || null,
+            vin_number: vinNumber || null,
+            equipment_type: equipmentType || null,
+            appointment_number: appointmentNumber || null,
+            blob_url: documentUrl || null,
+            broker_email: brokerEmail || null,
+            rate_confirmation_pdf_url: documentUrl || null,
+          },
+        }),
+      })
 
-      if (customerError) {
-        throw new Error(`Error checking for existing customer: ${customerError.message}`)
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to create load")
       }
 
-      if (existingCustomer) {
-        customerId = existingCustomer.id
-        console.log("✅ Found existing customer:", customerId)
-      } else {
-        // Create new customer
-        const { data: newCustomer, error: createError } = await supabase
-          .from("customers")
-          .insert({
-            name: customerName,
-            company_id: user.companyId,
-          })
-          .select("id")
-          .single()
+      const result = await response.json()
 
-        if (createError || !newCustomer) {
-          throw new Error(`Error creating customer: ${createError?.message || "Unknown error"}`)
-        }
-
-        customerId = newCustomer.id
-        console.log("✅ Created new customer:", customerId)
-      }
-
-      // Get dispatcher ID (using the current user's ID)
-      const dispatcherId = user.id
-
-      // Generate unique load number
-      const finalLoadNumber = await generateUniqueLoadNumber(user.companyId, loadNumber || undefined)
-
-      // Create the load with all required fields
-      const loadData = {
-        load_number: finalLoadNumber, // Use the verified unique load number
-        reference_number: referenceNumber,
-        company_id: user.companyId,
-        customer_id: customerId,
-        dispatcher_id: dispatcherId,
-        status: "new",
-        pickup_address: pickupAddress,
-        pickup_city: pickupCity,
-        pickup_state: pickupState,
-        pickup_zip: pickupZip || null,
-        pickup_date: pickupDate,
-        pickup_time: pickupTime || null,
-        pickup_contact_name: pickupContactName || null,
-        pickup_contact_phone: pickupContactPhone || null,
-        pickup_operating_hours: pickupHours || null,
-        delivery_address: deliveryAddress,
-        delivery_city: deliveryCity,
-        delivery_state: deliveryState,
-        delivery_zip: deliveryZip || null,
-        delivery_date: deliveryDate,
-        delivery_time: deliveryTime || null,
-        rate: rate,
-        distance: distance,
-        weight: weight,
-        commodity: commodity || null,
-        special_instructions: specialInstructions || null,
-        vin_number: vinNumber || null,
-        equipment_type: equipmentType || null,
-        created_at: new Date().toISOString(),
-        appointment_number: appointmentNumber || null,
-        blob_url: documentUrl || null,
-        broker_email: brokerEmail || null,
-        rate_confirmation_pdf_url: documentUrl || null,
-      }
-
-      console.log("🚀 Creating load with unique load number:", finalLoadNumber)
-
-      const { data: newLoad, error: loadError } = await supabase.from("loads").insert(loadData).select().single()
-
-      if (loadError) {
-        console.error("❌ Error creating load:", loadError)
-        // Handle specific constraint violations
-        if (loadError.code === "23505" && loadError.message.includes("loads_company_id_load_number_key")) {
-          throw new Error("Load number already exists. Please try again or specify a different load number.")
-        }
-        throw new Error(`Error creating load: ${loadError.message}`)
-      }
-
-      console.log("✅ Load created successfully:", newLoad)
+      console.log("✅ Load created successfully:", result.load)
 
       toast({
         title: "Success",
-        description: `Load ${newLoad.load_number} created successfully`,
+        description: `Load ${result.load.load_number} created successfully`,
       })
 
       onClose()
