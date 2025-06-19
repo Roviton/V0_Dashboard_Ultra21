@@ -28,6 +28,8 @@ export interface DriverUpdateInput {
   fuel_card_number?: string
   equipment_preferences?: string[]
   notes?: string
+  location?: string
+  rating?: number
 }
 
 export async function getDrivers() {
@@ -53,7 +55,9 @@ export async function getDrivers() {
 
 export async function getDriverById(id: string) {
   try {
-    // First, get the basic driver information
+    console.log("Fetching driver by ID:", id)
+
+    // Get the complete driver information with all fields
     const { data: driverData, error: driverError } = await supabase.from("drivers").select("*").eq("id", id).single()
 
     if (driverError) {
@@ -65,102 +69,147 @@ export async function getDriverById(id: string) {
       throw new Error("Driver not found")
     }
 
-    // Transform the data to match the expected interface
-    const transformedData = {
-      id: driverData.id,
-      first_name: driverData.name?.split(" ")[0] || "",
-      last_name: driverData.name?.split(" ").slice(1).join(" ") || "",
-      email: driverData.email,
-      phone: driverData.phone,
-      date_of_birth: null,
-      address_line_1: null,
-      address_line_2: null,
-      city: null,
-      state: null,
-      zip_code: null,
-      emergency_contact_name: null,
-      emergency_contact_phone: null,
-      hire_date: null,
-      driver_type: "company",
-      license_number: driverData.license_number,
-      license_state: null,
-      license_expiration: null,
-      equipment_preferences: [], // Remove equipment_type reference
-      fuel_card_number: null,
-      truck_number: null,
-      trailer_number: null,
-      notes: driverData.notes,
-      status: driverData.status,
-      avatar_url: null,
-      driver_performance: [
-        {
-          total_miles: 0,
-          total_revenue: 0,
-          total_loads: 0,
-          on_time_delivery_rate: 95,
-          load_acceptance_rate: 90,
-          average_rpm: 2.5,
-        },
-      ],
-      driver_messaging: [
-        {
-          telegram_enabled: false,
-          whatsapp_enabled: false,
-          sms_enabled: true,
-          email_enabled: true,
-        },
-      ],
-      driver_documents: [],
-      co_driver: null,
-      license_type: "Class A CDL",
-      license_expiry: null,
-    }
+    console.log("Raw driver data from database:", driverData)
 
-    return transformedData
+    // Return the actual database data directly - don't transform unnecessarily
+    return driverData
   } catch (error: any) {
     console.error("Unexpected error fetching driver by ID:", error)
     throw error
   }
 }
 
+// Helper function to safely handle date values
+function sanitizeDateValue(dateValue: string | undefined | null): string | null {
+  if (!dateValue || dateValue.trim() === "") {
+    return null
+  }
+  return dateValue
+}
+
+// Helper function to safely handle string values
+function sanitizeStringValue(stringValue: string | undefined | null): string | null {
+  if (!stringValue || stringValue.trim() === "") {
+    return null
+  }
+  return stringValue
+}
+
+// Helper function to safely handle number values
+function sanitizeNumberValue(numberValue: number | undefined | null): number | null {
+  if (numberValue === undefined || numberValue === null || isNaN(numberValue)) {
+    return null
+  }
+  return numberValue
+}
+
 export async function updateDriver(updates: DriverUpdateInput) {
   try {
     const { id, first_name, last_name, ...otherUpdates } = updates
 
+    console.log("Updating driver with full data:", updates)
+
     // Combine first and last name into a single name field
     const name = `${first_name || ""} ${last_name || ""}`.trim()
 
-    // Only update fields that exist in the database
+    // Map all the update fields to database columns with proper sanitization
     const updateData: any = {}
 
     if (name) {
       updateData.name = name
     }
 
+    // Handle string fields - convert empty strings to null
     if (otherUpdates.email !== undefined) {
-      updateData.email = otherUpdates.email
+      updateData.email = sanitizeStringValue(otherUpdates.email)
     }
-
     if (otherUpdates.phone !== undefined) {
-      updateData.phone = otherUpdates.phone
+      updateData.phone = sanitizeStringValue(otherUpdates.phone)
     }
-
+    if (otherUpdates.address_line_1 !== undefined) {
+      updateData.address_line_1 = sanitizeStringValue(otherUpdates.address_line_1)
+    }
+    if (otherUpdates.address_line_2 !== undefined) {
+      updateData.address_line_2 = sanitizeStringValue(otherUpdates.address_line_2)
+    }
+    if (otherUpdates.city !== undefined) {
+      updateData.city = sanitizeStringValue(otherUpdates.city)
+    }
+    if (otherUpdates.state !== undefined) {
+      updateData.state = sanitizeStringValue(otherUpdates.state)
+    }
+    if (otherUpdates.zip_code !== undefined) {
+      updateData.zip_code = sanitizeStringValue(otherUpdates.zip_code)
+    }
+    if (otherUpdates.emergency_contact_name !== undefined) {
+      updateData.emergency_contact_name = sanitizeStringValue(otherUpdates.emergency_contact_name)
+    }
+    if (otherUpdates.emergency_contact_phone !== undefined) {
+      updateData.emergency_contact_phone = sanitizeStringValue(otherUpdates.emergency_contact_phone)
+    }
+    if (otherUpdates.driver_type !== undefined) {
+      updateData.driver_type = sanitizeStringValue(otherUpdates.driver_type)
+    }
     if (otherUpdates.license_number !== undefined) {
-      updateData.license_number = otherUpdates.license_number
+      updateData.license_number = sanitizeStringValue(otherUpdates.license_number)
     }
-
+    if (otherUpdates.license_state !== undefined) {
+      updateData.license_state = sanitizeStringValue(otherUpdates.license_state)
+    }
+    if (otherUpdates.license_type !== undefined) {
+      updateData.license_type = sanitizeStringValue(otherUpdates.license_type)
+    }
+    if (otherUpdates.truck_number !== undefined) {
+      updateData.truck_number = sanitizeStringValue(otherUpdates.truck_number)
+    }
+    if (otherUpdates.trailer_number !== undefined) {
+      updateData.trailer_number = sanitizeStringValue(otherUpdates.trailer_number)
+    }
+    if (otherUpdates.fuel_card_number !== undefined) {
+      updateData.fuel_card_number = sanitizeStringValue(otherUpdates.fuel_card_number)
+    }
     if (otherUpdates.notes !== undefined) {
-      updateData.notes = otherUpdates.notes
+      updateData.notes = sanitizeStringValue(otherUpdates.notes)
+    }
+    if (otherUpdates.location !== undefined) {
+      updateData.location = sanitizeStringValue(otherUpdates.location)
     }
 
-    // Remove any undefined values
+    // Handle date fields - convert empty strings to null
+    if (otherUpdates.date_of_birth !== undefined) {
+      updateData.date_of_birth = sanitizeDateValue(otherUpdates.date_of_birth)
+    }
+    if (otherUpdates.hire_date !== undefined) {
+      updateData.hire_date = sanitizeDateValue(otherUpdates.hire_date)
+    }
+    if (otherUpdates.license_expiry !== undefined) {
+      updateData.license_expiry = sanitizeDateValue(otherUpdates.license_expiry)
+    }
+
+    // Handle number fields
+    if (otherUpdates.rating !== undefined) {
+      updateData.rating = sanitizeNumberValue(otherUpdates.rating)
+    }
+
+    // Handle array fields
+    if (otherUpdates.equipment_preferences !== undefined) {
+      updateData.equipment_preferences =
+        otherUpdates.equipment_preferences && otherUpdates.equipment_preferences.length > 0
+          ? otherUpdates.equipment_preferences
+          : null
+    }
+
+    // Always update the updated_at timestamp
+    updateData.updated_at = new Date().toISOString()
+
+    // Remove any undefined values (but keep null values)
     Object.keys(updateData).forEach((key) => {
       if (updateData[key] === undefined) {
         delete updateData[key]
       }
     })
 
-    console.log("Updating driver with data:", updateData)
+    console.log("Final update data for database:", updateData)
 
     const { data, error } = await supabase.from("drivers").update(updateData).eq("id", id).select().single()
 
@@ -169,6 +218,7 @@ export async function updateDriver(updates: DriverUpdateInput) {
       throw new Error(error.message)
     }
 
+    console.log("Driver updated successfully:", data)
     revalidatePath("/dashboard/drivers")
     return data
   } catch (error: any) {
@@ -222,15 +272,78 @@ export async function deleteDriver(driverId: string) {
   }
 }
 
-export async function createDriver(driverData: any) {
+export interface CreateDriverData {
+  name: string
+  email?: string
+  phone?: string
+  dateOfBirth?: string
+  addressLine1?: string
+  addressLine2?: string
+  city?: string
+  state?: string
+  zipCode?: string
+  emergencyContactName?: string
+  emergencyContactPhone?: string
+  hireDate?: string
+  driverType?: "company" | "owner_operator" | "lease_operator"
+  licenseNumber?: string
+  licenseState?: string
+  licenseExpiration?: string
+  equipmentPreferences?: string[]
+  fuelCardNumber?: string
+  truckNumber?: string
+  trailerNumber?: string
+  notes?: string
+  companyId: string
+}
+
+export async function createDriver(driverData: CreateDriverData) {
   try {
-    const { data, error } = await supabase.from("drivers").insert(driverData).select().single()
+    console.log("Creating driver with data:", driverData)
+
+    // Map the form data to our actual database schema with proper column names and sanitization
+    const dbDriverData = {
+      name: driverData.name,
+      email: sanitizeStringValue(driverData.email),
+      phone: sanitizeStringValue(driverData.phone),
+      date_of_birth: sanitizeDateValue(driverData.dateOfBirth),
+      address_line_1: sanitizeStringValue(driverData.addressLine1),
+      address_line_2: sanitizeStringValue(driverData.addressLine2),
+      city: sanitizeStringValue(driverData.city),
+      state: sanitizeStringValue(driverData.state),
+      zip_code: sanitizeStringValue(driverData.zipCode),
+      emergency_contact_name: sanitizeStringValue(driverData.emergencyContactName),
+      emergency_contact_phone: sanitizeStringValue(driverData.emergencyContactPhone),
+      hire_date: sanitizeDateValue(driverData.hireDate),
+      driver_type: driverData.driverType || "company",
+      license_number: sanitizeStringValue(driverData.licenseNumber),
+      license_state: sanitizeStringValue(driverData.licenseState),
+      license_expiry: sanitizeDateValue(driverData.licenseExpiration),
+      equipment_preferences:
+        driverData.equipmentPreferences && driverData.equipmentPreferences.length > 0
+          ? driverData.equipmentPreferences
+          : null,
+      fuel_card_number: sanitizeStringValue(driverData.fuelCardNumber),
+      truck_number: sanitizeStringValue(driverData.truckNumber),
+      trailer_number: sanitizeStringValue(driverData.trailerNumber),
+      notes: sanitizeStringValue(driverData.notes),
+      company_id: driverData.companyId,
+      status: "available" as const,
+      is_active: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+
+    console.log("Mapped driver data for database:", dbDriverData)
+
+    const { data, error } = await supabase.from("drivers").insert(dbDriverData).select().single()
 
     if (error) {
       console.error("Error creating driver:", error)
       return { success: false, error: error.message }
     }
 
+    console.log("Driver created successfully:", data)
     revalidatePath("/dashboard/drivers")
     return { success: true, data }
   } catch (error: any) {
