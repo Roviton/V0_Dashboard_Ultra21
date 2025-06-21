@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase-client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -9,7 +9,6 @@ import { CheckCircle, XCircle, Loader2, Truck } from "lucide-react"
 
 export default function AuthCallback() {
   const router = useRouter()
-  const searchParams = useSearchParams()
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading")
   const [message, setMessage] = useState("Confirming your account...")
 
@@ -17,135 +16,67 @@ export default function AuthCallback() {
     const handleAuthCallback = async () => {
       try {
         console.log("🔄 Processing auth callback...")
-        console.log("URL search params:", searchParams.toString())
-        console.log("URL hash:", window.location.hash)
-        console.log("Full URL:", window.location.href)
 
-        // Check if there are any hash parameters
-        const hashParams = new URLSearchParams(window.location.hash.substring(1))
-        const accessToken = hashParams.get("access_token")
-        const refreshToken = hashParams.get("refresh_token")
-        const type = hashParams.get("type")
-        const error = hashParams.get("error")
+        // Handle the auth callback from URL hash
+        const { data, error } = await supabase.auth.getSession()
 
-        console.log("Hash parameters:", {
-          accessToken: accessToken ? "present" : "missing",
-          refreshToken: refreshToken ? "present" : "missing",
-          type,
-          error,
-        })
-
-        // If there's an error in the URL
         if (error) {
-          console.error("❌ URL contains error:", error)
+          console.error("❌ Auth callback error:", error)
           setStatus("error")
-          setMessage(`Confirmation failed: ${error}. Please try again or contact support.`)
+          setMessage("Failed to confirm your account. Please try again or contact support.")
           return
         }
 
-        // If no tokens in hash, check if user is already signed in
-        if (!accessToken && !refreshToken) {
-          console.log("🔍 No tokens in URL, checking existing session...")
-          const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
-
-          if (sessionError || !sessionData.session) {
-            console.log("❌ No existing session found")
-            setStatus("error")
-            setMessage("No confirmation tokens found. Please try clicking the email link again or sign in manually.")
-            return
-          }
-
-          console.log("✅ Found existing session")
-          const user = sessionData.session.user
-
-          // Check user profile
-          const { data: profile, error: profileError } = await supabase
-            .from("users")
-            .select(`
-              id, name, email, role, company_id, is_active,
-              companies(id, name)
-            `)
-            .eq("id", user.id)
-            .single()
-
-          if (profile && !profileError) {
-            setStatus("success")
-            setMessage("Account confirmed successfully! Redirecting to your dashboard...")
-
-            setTimeout(() => {
-              if (profile.role === "admin") {
-                router.push("/dashboard/admin")
-              } else {
-                router.push("/dashboard")
-              }
-            }, 2000)
-            return
-          }
+        if (!data.session?.user) {
+          console.log("❌ No session found")
+          setStatus("error")
+          setMessage("No valid session found. Please try signing in again.")
+          return
         }
 
-        // If we have tokens, try to set the session
-        if (accessToken && refreshToken) {
-          console.log("🔑 Setting session with tokens...")
-          const { data, error: sessionError } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          })
+        const user = data.session.user
+        console.log("✅ User session found:", user.email)
 
-          if (sessionError) {
-            console.error("❌ Session error:", sessionError)
-            setStatus("error")
-            setMessage("Failed to confirm your account. Please try again or contact support.")
-            return
-          }
+        // Check if user profile exists in database
+        const { data: profile, error: profileError } = await supabase
+          .from("users")
+          .select(`
+        id, name, email, role, company_id, is_active,
+        companies(id, name)
+      `)
+          .eq("id", user.id)
+          .single()
 
-          if (!data.session?.user) {
-            console.error("❌ No user in session")
-            setStatus("error")
-            setMessage("No valid session found. Please try signing in again.")
-            return
-          }
+        if (profile && !profileError) {
+          // Profile exists, redirect to dashboard
+          console.log("✅ User profile found, redirecting...")
+          setStatus("success")
+          setMessage("Account confirmed successfully! Redirecting to your dashboard...")
 
-          const user = data.session.user
-          console.log("✅ User session created:", user.email)
+          setTimeout(() => {
+            if (profile.role === "admin") {
+              router.push("/dashboard/admin")
+            } else {
+              router.push("/dashboard")
+            }
+          }, 2000)
+        } else {
+          // Profile doesn't exist - this is a critical issue
+          console.error("❌ Profile not found for confirmed user:", user.id)
+          console.log("User metadata:", user.user_metadata)
 
-          // Small delay to ensure database operations are complete
-          await new Promise((resolve) => setTimeout(resolve, 1000))
-
-          // Check if user profile exists in database
-          const { data: profile, error: profileError } = await supabase
-            .from("users")
-            .select(`
-              id, name, email, role, company_id, is_active,
-              companies(id, name)
-            `)
-            .eq("id", user.id)
-            .single()
-
-          if (profile && !profileError) {
-            // Profile exists, redirect to dashboard
-            console.log("✅ User profile found:", profile)
-            setStatus("success")
-            setMessage("Account confirmed successfully! Redirecting to your dashboard...")
-
-            setTimeout(() => {
-              if (profile.role === "admin") {
-                router.push("/dashboard/admin")
-              } else {
-                router.push("/dashboard")
-              }
-            }, 2000)
-          } else {
-            console.error("❌ Profile lookup error:", profileError)
+          const userMetadata = user.user_metadata
+          if (userMetadata?.company_name && userMetadata?.full_name) {
+            // This looks like a registration callback but profile creation failed
             setStatus("error")
             setMessage(
-              "Account confirmed but profile lookup failed. Please try signing in manually or contact support.",
+              "Account confirmation incomplete. Profile creation failed during registration. Please contact support or try registering again.",
             )
+          } else {
+            // No metadata, something went wrong
+            setStatus("error")
+            setMessage("Account confirmation incomplete. Please try registering again or contact support.")
           }
-        } else {
-          // No tokens and no existing session
-          console.log("❌ No authentication tokens found")
-          setStatus("error")
-          setMessage("No confirmation tokens found. Please try clicking the email link again.")
         }
       } catch (error) {
         console.error("❌ Callback processing error:", error)
@@ -154,10 +85,8 @@ export default function AuthCallback() {
       }
     }
 
-    // Add a small delay to ensure the page is fully loaded
-    const timer = setTimeout(handleAuthCallback, 500)
-    return () => clearTimeout(timer)
-  }, [router, searchParams])
+    handleAuthCallback()
+  }, [router])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
