@@ -79,32 +79,18 @@ export function useAdminDashboard() {
         console.warn("Error in comments query, defaulting count to 0:", commentsErr)
       }
 
-      // Get low rate loads for attention required section - company filtered
-      // Use a simpler query to avoid RLS recursion
-      const { data: lowRateLoads, error: lowRateLoadsError } = await supabase
+      // Get low rate loads count (RPM < 2.0) - company filtered
+      const { data: lowRateLoadsData, error: lowRateError } = await supabase
         .from("loads")
-        .select(
-          `
-    id, 
-    load_number, 
-    rate, 
-    distance,
-    dispatcher_id,
-    customer_id
-  `,
-        )
-        .eq("company_id", user.companyId)
+        .select("id")
+        .eq("company_id", user.companyId) // CRITICAL: Filter by company
         .not("rate", "is", null)
         .not("distance", "is", null)
-        .limit(5)
+        .filter("rate/distance", "lt", 2.0)
 
-      // Filter low rate loads in JavaScript to avoid complex SQL
-      const filteredLowRateLoads =
-        lowRateLoads?.filter((load) => load.rate && load.distance && load.rate / load.distance < 2.0) || []
+      if (lowRateError) throw new Error(`Error fetching low rate loads: ${lowRateError.message}`)
 
-      if (lowRateLoadsError) throw new Error(`Error fetching low rate loads details: ${lowRateLoadsError.message}`)
-
-      const needsAttention = commentsCount + (filteredLowRateLoads?.length || 0)
+      const needsAttention = commentsCount + (lowRateLoadsData?.length || 0)
 
       // Get monthly revenue - company filtered
       const now = new Date()
@@ -124,6 +110,24 @@ export function useAdminDashboard() {
       const monthlyRevenue = monthlyRevenueData.reduce((sum, load) => sum + (load.rate || 0), 0)
 
       // Get low rate loads for attention required section - company filtered
+      const { data: lowRateLoads, error: lowRateLoadsError } = await supabase
+        .from("loads")
+        .select(
+          `
+          id, load_number, rate, distance,
+          users!dispatcher_id(name),
+          customers(name)
+        `,
+        )
+        .eq("company_id", user.companyId) // CRITICAL: Filter by company
+        .not("rate", "is", null)
+        .not("distance", "is", null)
+        .filter("rate/distance", "lt", 2.0)
+        .limit(5)
+
+      if (lowRateLoadsError) throw new Error(`Error fetching low rate loads details: ${lowRateLoadsError.message}`)
+
+      // Get loads with admin comments needing dispatcher response
       // FIXED: Join with loads table to filter by company_id
       let pendingComments = []
       try {
@@ -168,46 +172,50 @@ export function useAdminDashboard() {
 
       if (delayedLoadsError) throw new Error(`Error fetching delayed loads: ${delayedLoadsError.message}`)
 
-      // Get dispatcher performance - simplified to avoid recursion
-      const { data: dispatchers, error: dispatcherError } = await supabase
+      // Get dispatcher performance - company filtered
+      const { data: dispatcherPerformance, error: dispatcherError } = await supabase
         .from("users")
-        .select("id, name")
+        .select(
+          `
+          id,
+          name,
+          loads:loads!dispatcher_id(
+            id,
+            rate,
+            distance,
+            status
+          )
+        `,
+        )
         .eq("role", "dispatcher")
-        .eq("company_id", user.companyId)
+        .eq("company_id", user.companyId) // CRITICAL: Filter by company
         .limit(5)
 
-      if (dispatcherError) throw new Error(`Error fetching dispatchers: ${dispatcherError.message}`)
+      if (dispatcherError) throw new Error(`Error fetching dispatcher performance: ${dispatcherError.message}`)
 
-      // Get loads for each dispatcher separately
-      const processedDispatcherPerformance = []
-      for (const dispatcher of dispatchers || []) {
-        const { data: dispatcherLoads } = await supabase
-          .from("loads")
-          .select("id, rate, distance, status")
-          .eq("dispatcher_id", dispatcher.id)
-          .eq("company_id", user.companyId)
+      // Process dispatcher performance data
+      const processedDispatcherPerformance = dispatcherPerformance
+        .map((dispatcher) => {
+          const loads = dispatcher.loads || []
+          const totalLoads = loads.length
+          const completedLoads = loads.filter((load) => load.status === "completed").length
+          const totalRPM = loads.reduce(
+            (sum, load) => sum + (load.rate && load.distance ? load.rate / load.distance : 0),
+            0,
+          )
+          const avgRPM = totalLoads > 0 ? totalRPM / totalLoads : 0
+          const completionRate = totalLoads > 0 ? (completedLoads / totalLoads) * 100 : 0
 
-        const loads = dispatcherLoads || []
-        const totalLoads = loads.length
-        const completedLoads = loads.filter((load) => load.status === "completed").length
-        const totalRPM = loads.reduce(
-          (sum, load) => sum + (load.rate && load.distance ? load.rate / load.distance : 0),
-          0,
-        )
-        const avgRPM = totalLoads > 0 ? totalRPM / totalLoads : 0
-        const completionRate = totalLoads > 0 ? (completedLoads / totalLoads) * 100 : 0
-
-        processedDispatcherPerformance.push({
-          id: dispatcher.id,
-          name: dispatcher.name,
-          totalLoads,
-          completedLoads,
-          avgRPM,
-          completionRate,
+          return {
+            id: dispatcher.id,
+            name: dispatcher.name,
+            totalLoads,
+            completedLoads,
+            avgRPM,
+            completionRate,
+          }
         })
-      }
-
-      processedDispatcherPerformance.sort((a, b) => b.avgRPM - a.avgRPM)
+        .sort((a, b) => b.avgRPM - a.avgRPM)
 
       console.log(`✅ Fetched dashboard data for company ${user.companyId}:`, {
         totalLoads: totalLoads || 0,
@@ -221,7 +229,7 @@ export function useAdminDashboard() {
         averageRPM,
         needsAttention,
         monthlyRevenue,
-        lowRateLoads: filteredLowRateLoads,
+        lowRateLoads,
         pendingComments,
         delayedLoads,
         dispatcherPerformance: processedDispatcherPerformance,

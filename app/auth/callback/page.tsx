@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase-client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -9,7 +9,6 @@ import { CheckCircle, XCircle, Loader2, Truck } from "lucide-react"
 
 export default function AuthCallback() {
   const router = useRouter()
-  const searchParams = useSearchParams()
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading")
   const [message, setMessage] = useState("Confirming your account...")
 
@@ -17,53 +16,40 @@ export default function AuthCallback() {
     const handleAuthCallback = async () => {
       try {
         console.log("🔄 Processing auth callback...")
-        console.log("URL search params:", searchParams.toString())
-        console.log("URL hash:", window.location.hash)
 
-        // Handle the auth callback - this processes the URL hash parameters
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+        // Handle the auth callback from URL hash
+        const { data, error } = await supabase.auth.getSession()
 
-        if (sessionError) {
-          console.error("❌ Session error:", sessionError)
-          // Try to exchange the URL hash for a session
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(window.location.href)
-          if (exchangeError) {
-            console.error("❌ Code exchange error:", exchangeError)
-            setStatus("error")
-            setMessage("Failed to confirm your account. Please try again or contact support.")
-            return
-          }
+        if (error) {
+          console.error("❌ Auth callback error:", error)
+          setStatus("error")
+          setMessage("Failed to confirm your account. Please try again or contact support.")
+          return
         }
 
-        // Get the current session after potential exchange
-        const { data: currentSession, error: currentError } = await supabase.auth.getSession()
-
-        if (currentError || !currentSession.session?.user) {
-          console.error("❌ No valid session found:", currentError)
+        if (!data.session?.user) {
+          console.log("❌ No session found")
           setStatus("error")
           setMessage("No valid session found. Please try signing in again.")
           return
         }
 
-        const user = currentSession.session.user
+        const user = data.session.user
         console.log("✅ User session found:", user.email)
-
-        // Small delay to ensure database operations are complete
-        await new Promise((resolve) => setTimeout(resolve, 1000))
 
         // Check if user profile exists in database
         const { data: profile, error: profileError } = await supabase
           .from("users")
           .select(`
-            id, name, email, role, company_id, is_active,
-            companies(id, name)
-          `)
+        id, name, email, role, company_id, is_active,
+        companies(id, name)
+      `)
           .eq("id", user.id)
           .single()
 
         if (profile && !profileError) {
           // Profile exists, redirect to dashboard
-          console.log("✅ User profile found:", profile)
+          console.log("✅ User profile found, redirecting...")
           setStatus("success")
           setMessage("Account confirmed successfully! Redirecting to your dashboard...")
 
@@ -75,38 +61,21 @@ export default function AuthCallback() {
             }
           }, 2000)
         } else {
-          console.error("❌ Profile lookup error:", profileError)
+          // Profile doesn't exist - this is a critical issue
+          console.error("❌ Profile not found for confirmed user:", user.id)
+          console.log("User metadata:", user.user_metadata)
 
-          // Try one more time with a longer delay
-          await new Promise((resolve) => setTimeout(resolve, 3000))
-
-          const { data: retryProfile, error: retryError } = await supabase
-            .from("users")
-            .select(`
-              id, name, email, role, company_id, is_active,
-              companies(id, name)
-            `)
-            .eq("id", user.id)
-            .single()
-
-          if (retryProfile && !retryError) {
-            console.log("✅ Profile found on retry:", retryProfile)
-            setStatus("success")
-            setMessage("Account confirmed successfully! Redirecting to your dashboard...")
-
-            setTimeout(() => {
-              if (retryProfile.role === "admin") {
-                router.push("/dashboard/admin")
-              } else {
-                router.push("/dashboard")
-              }
-            }, 1000)
-          } else {
-            console.error("❌ Profile still not found:", retryError)
+          const userMetadata = user.user_metadata
+          if (userMetadata?.company_name && userMetadata?.full_name) {
+            // This looks like a registration callback but profile creation failed
             setStatus("error")
             setMessage(
-              "Account confirmed but profile lookup failed. Please try signing in manually or contact support.",
+              "Account confirmation incomplete. Profile creation failed during registration. Please contact support or try registering again.",
             )
+          } else {
+            // No metadata, something went wrong
+            setStatus("error")
+            setMessage("Account confirmation incomplete. Please try registering again or contact support.")
           }
         }
       } catch (error) {
@@ -117,7 +86,7 @@ export default function AuthCallback() {
     }
 
     handleAuthCallback()
-  }, [router, searchParams])
+  }, [router])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
