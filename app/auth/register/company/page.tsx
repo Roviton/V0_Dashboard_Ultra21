@@ -12,8 +12,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Truck, Building2, User, CheckCircle, AlertCircle, Mail } from "lucide-react"
-import { supabase } from "@/lib/supabase-client"
-import { config } from "@/lib/config"
 
 interface CompanyFormData {
   // Company Information
@@ -167,112 +165,54 @@ export default function CompanyRegistrationPage() {
 
     try {
       console.log("🚀 Starting company registration process...")
-      console.log("🌍 Environment:", process.env.NODE_ENV)
-      console.log("🔗 Redirect URL will be:", config.authRedirectUrl)
 
-      // Step 1: Create Supabase Auth user account with email confirmation
-      console.log("📝 Creating Supabase Auth user...")
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.adminEmail,
-        password: formData.password,
-        options: {
-          data: {
-            full_name: formData.adminName,
-            phone: formData.adminPhone,
-            role: "admin",
-            company_name: formData.companyName,
-          },
-          emailRedirectTo: config.authRedirectUrl, // Use config instead of hardcoded URL
+      // Call our API route instead of direct Supabase calls
+      const response = await fetch("/api/auth/register-company", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          companyName: formData.companyName,
+          businessAddress: formData.businessAddress,
+          businessPhone: formData.businessPhone,
+          dotNumber: formData.dotNumber,
+          mcNumber: formData.mcNumber,
+          adminName: formData.adminName,
+          adminEmail: formData.adminEmail,
+          adminPhone: formData.adminPhone,
+          password: formData.password,
+        }),
       })
 
-      if (authError) {
-        console.error("❌ Auth error:", authError)
-        if (authError.message.includes("already registered") || authError.message.includes("already been registered")) {
+      const result = await response.json()
+
+      if (!response.ok) {
+        console.error("❌ Registration failed:", result.error)
+        if (result.error.includes("already registered") || result.error.includes("already been registered")) {
           setErrors({ general: "An account with this email already exists. Try signing in instead." })
-        } else if (authError.message.includes("Invalid email")) {
+        } else if (result.error.includes("Invalid email")) {
           setErrors({ adminEmail: "Please enter a valid email address" })
-        } else if (authError.message.includes("Password")) {
+        } else if (result.error.includes("Password")) {
           setErrors({ password: "Password does not meet requirements" })
         } else {
-          setErrors({ general: `Registration failed: ${authError.message}` })
+          setErrors({ general: `Registration failed: ${result.error}` })
         }
         setLoading(false)
         return
       }
 
-      if (!authData.user) {
-        setErrors({ general: "Failed to create user account. Please try again." })
-        setLoading(false)
-        return
-      }
+      console.log("✅ Registration successful:", result)
 
-      console.log("✅ Auth user created:", authData.user.id)
-
-      // Step 2: Create company record
-      console.log("🏢 Creating company record...")
-      const { data: companyData, error: companyError } = await supabase
-        .from("companies")
-        .insert({
-          name: formData.companyName,
-          address: formData.businessAddress,
-          phone: formData.businessPhone,
-          email: formData.adminEmail,
-          dot_number: formData.dotNumber || null,
-          mc_number: formData.mcNumber || null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .select()
-        .single()
-
-      if (companyError) {
-        console.error("❌ Company creation error:", companyError)
-        setErrors({ general: `Failed to create company record: ${companyError.message}` })
-        setLoading(false)
-        return
-      }
-
-      console.log("✅ Company created:", companyData.id)
-
-      // Step 3: Create user profile record (CRITICAL FIX)
-      console.log("👤 Creating user profile...")
-      const { data: userProfile, error: userError } = await supabase
-        .from("users")
-        .insert({
-          id: authData.user.id, // Use Supabase Auth user ID
-          company_id: companyData.id,
-          email: formData.adminEmail,
-          name: formData.adminName,
-          role: "admin",
-          phone: formData.adminPhone,
-          is_active: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .select()
-        .single()
-
-      if (userError) {
-        console.error("❌ User profile creation error:", userError)
-        setErrors({ general: `Failed to create user profile: ${userError.message}. Please contact support.` })
-
-        // TODO: Consider cleanup - delete auth user and company if profile creation fails
-        setLoading(false)
-        return
-      }
-
-      console.log("✅ User profile created:", userProfile.id)
-
-      // Step 4: Handle email confirmation flow
-      if (!authData.session) {
+      // Handle email confirmation flow
+      if (result.needsEmailConfirmation) {
         console.log("📧 Email confirmation required")
         setEmailConfirmationSent(true)
         setLoading(false)
         return
       }
 
-      // Step 5: Success! User is already authenticated by Supabase
+      // Success! User is already authenticated
       console.log("🎉 Registration completed successfully!")
       setSuccess(true)
 
