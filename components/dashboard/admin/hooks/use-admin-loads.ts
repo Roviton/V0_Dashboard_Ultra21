@@ -10,7 +10,7 @@ export function useAdminLoads(filters: any) {
 
   // Mock data for demonstration
   const mockLoads: AdminLoad[] = [
-    {
+  /*{
       id: "1",
       loadNumber: "L-2025-001",
       origin: "Los Angeles, CA",
@@ -181,7 +181,7 @@ export function useAdminLoads(filters: any) {
       ],
       createdAt: "2025-01-13T15:00:00Z",
       updatedAt: "2025-01-14T16:00:00Z",
-    },
+    },*/
   ]
 
   const refreshLoads = async () => {
