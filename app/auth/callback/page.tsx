@@ -19,100 +19,68 @@ export default function AuthCallback() {
         console.log("🔄 Processing auth callback...")
         console.log("URL search params:", searchParams.toString())
         console.log("URL hash:", window.location.hash)
-        console.log("Full URL:", window.location.href)
 
-        // Check if there are any hash parameters
-        const hashParams = new URLSearchParams(window.location.hash.substring(1))
-        const accessToken = hashParams.get("access_token")
-        const refreshToken = hashParams.get("refresh_token")
-        const type = hashParams.get("type")
-        const error = hashParams.get("error")
+        // Handle the auth callback - this processes the URL hash parameters
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
 
-        console.log("Hash parameters:", {
-          accessToken: accessToken ? "present" : "missing",
-          refreshToken: refreshToken ? "present" : "missing",
-          type,
-          error,
-        })
-
-        // If there's an error in the URL
-        if (error) {
-          console.error("❌ URL contains error:", error)
-          setStatus("error")
-          setMessage(`Confirmation failed: ${error}. Please try again or contact support.`)
-          return
-        }
-
-        // If no tokens in hash, check if user is already signed in
-        if (!accessToken && !refreshToken) {
-          console.log("🔍 No tokens in URL, checking existing session...")
-          const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
-
-          if (sessionError || !sessionData.session) {
-            console.log("❌ No existing session found")
-            setStatus("error")
-            setMessage("No confirmation tokens found. Please try clicking the email link again or sign in manually.")
-            return
-          }
-
-          console.log("✅ Found existing session")
-          const user = sessionData.session.user
-
-          // Check user profile
-          const { data: profile, error: profileError } = await supabase
-            .from("users")
-            .select(`
-              id, name, email, role, company_id, is_active,
-              companies(id, name)
-            `)
-            .eq("id", user.id)
-            .single()
-
-          if (profile && !profileError) {
-            setStatus("success")
-            setMessage("Account confirmed successfully! Redirecting to your dashboard...")
-
-            setTimeout(() => {
-              if (profile.role === "admin") {
-                router.push("/dashboard/admin")
-              } else {
-                router.push("/dashboard")
-              }
-            }, 2000)
-            return
-          }
-        }
-
-        // If we have tokens, try to set the session
-        if (accessToken && refreshToken) {
-          console.log("🔑 Setting session with tokens...")
-          const { data, error: sessionError } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          })
-
-          if (sessionError) {
-            console.error("❌ Session error:", sessionError)
+        if (sessionError) {
+          console.error("❌ Session error:", sessionError)
+          // Try to exchange the URL hash for a session
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(window.location.href)
+          if (exchangeError) {
+            console.error("❌ Code exchange error:", exchangeError)
             setStatus("error")
             setMessage("Failed to confirm your account. Please try again or contact support.")
             return
           }
+        }
 
-          if (!data.session?.user) {
-            console.error("❌ No user in session")
-            setStatus("error")
-            setMessage("No valid session found. Please try signing in again.")
-            return
-          }
+        // Get the current session after potential exchange
+        const { data: currentSession, error: currentError } = await supabase.auth.getSession()
 
-          const user = data.session.user
-          console.log("✅ User session created:", user.email)
+        if (currentError || !currentSession.session?.user) {
+          console.error("❌ No valid session found:", currentError)
+          setStatus("error")
+          setMessage("No valid session found. Please try signing in again.")
+          return
+        }
 
-          // Small delay to ensure database operations are complete
-          await new Promise((resolve) => setTimeout(resolve, 1000))
+        const user = currentSession.session.user
+        console.log("✅ User session found:", user.email)
 
-          // Check if user profile exists in database
-          const { data: profile, error: profileError } = await supabase
+        // Small delay to ensure database operations are complete
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+
+        // Check if user profile exists in database
+        const { data: profile, error: profileError } = await supabase
+          .from("users")
+          .select(`
+            id, name, email, role, company_id, is_active,
+            companies(id, name)
+          `)
+          .eq("id", user.id)
+          .single()
+
+        if (profile && !profileError) {
+          // Profile exists, redirect to dashboard
+          console.log("✅ User profile found:", profile)
+          setStatus("success")
+          setMessage("Account confirmed successfully! Redirecting to your dashboard...")
+
+          setTimeout(() => {
+            if (profile.role === "admin") {
+              router.push("/dashboard/admin")
+            } else {
+              router.push("/dashboard")
+            }
+          }, 2000)
+        } else {
+          console.error("❌ Profile lookup error:", profileError)
+
+          // Try one more time with a longer delay
+          await new Promise((resolve) => setTimeout(resolve, 3000))
+
+          const { data: retryProfile, error: retryError } = await supabase
             .from("users")
             .select(`
               id, name, email, role, company_id, is_active,
@@ -121,31 +89,25 @@ export default function AuthCallback() {
             .eq("id", user.id)
             .single()
 
-          if (profile && !profileError) {
-            // Profile exists, redirect to dashboard
-            console.log("✅ User profile found:", profile)
+          if (retryProfile && !retryError) {
+            console.log("✅ Profile found on retry:", retryProfile)
             setStatus("success")
             setMessage("Account confirmed successfully! Redirecting to your dashboard...")
 
             setTimeout(() => {
-              if (profile.role === "admin") {
+              if (retryProfile.role === "admin") {
                 router.push("/dashboard/admin")
               } else {
                 router.push("/dashboard")
               }
-            }, 2000)
+            }, 1000)
           } else {
-            console.error("❌ Profile lookup error:", profileError)
+            console.error("❌ Profile still not found:", retryError)
             setStatus("error")
             setMessage(
               "Account confirmed but profile lookup failed. Please try signing in manually or contact support.",
             )
           }
-        } else {
-          // No tokens and no existing session
-          console.log("❌ No authentication tokens found")
-          setStatus("error")
-          setMessage("No confirmation tokens found. Please try clicking the email link again.")
         }
       } catch (error) {
         console.error("❌ Callback processing error:", error)
@@ -154,9 +116,7 @@ export default function AuthCallback() {
       }
     }
 
-    // Add a small delay to ensure the page is fully loaded
-    const timer = setTimeout(handleAuthCallback, 500)
-    return () => clearTimeout(timer)
+    handleAuthCallback()
   }, [router, searchParams])
 
   return (

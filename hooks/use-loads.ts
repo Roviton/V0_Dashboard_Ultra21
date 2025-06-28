@@ -56,78 +56,50 @@ export default function useLoads({ viewMode = "active" }: { viewMode?: "active" 
   const { user } = useAuth()
 
   const fetchLoads = useCallback(async () => {
+    if (!user?.companyId) {
+      console.log("No company ID found, clearing loads")
+      setLoads([])
+      setLoading(false)
+      return
+    }
+
     try {
       setLoading(true)
       setError(null)
 
-      // Use demo company ID if no user company ID is available
-      const companyId = user?.companyId
+      console.log("🔍 Fetching loads for company:", user.companyId)
 
-      console.log("🔍 Fetching loads for company:", companyId)
-
-      // Start with a simple query to avoid RLS issues
       let query = supabase
         .from("loads")
         .select(`
-          *
+          *,
+          customer:customers(*),
+          load_drivers(
+            *,
+            driver:drivers(*)
+          )
         `)
-        .eq("company_id", companyId)
+        .eq("company_id", user.companyId) // CRITICAL: Filter by company_id
 
       // Apply view mode filter
       if (viewMode === "active") {
         query = query.in("status", ["new", "assigned", "accepted", "in_progress"])
       } else if (viewMode === "history") {
         query = query.in("status", ["completed", "cancelled", "archived"])
+      } else if (viewMode === "all") {
+        // No filter for 'all' mode
       }
 
       query = query.order("created_at", { ascending: false })
 
-      const { data: loadsData, error: fetchError } = await query
+      const { data, error: fetchError } = await query
 
       if (fetchError) {
-        console.error("Error fetching loads:", fetchError)
         throw fetchError
       }
 
-      console.log(`✅ Fetched ${loadsData?.length || 0} loads`)
-
-      // If we have loads, try to fetch related data separately to avoid RLS issues
-      if (loadsData && loadsData.length > 0) {
-        try {
-          // Fetch customers separately
-          const { data: customersData } = await supabase.from("customers").select("*").eq("company_id", companyId)
-
-          // Fetch drivers separately
-          const { data: driversData } = await supabase.from("drivers").select("*").eq("company_id", companyId)
-
-          // Fetch load_drivers separately
-          const loadIds = loadsData.map((load) => load.id)
-          const { data: loadDriversData } = await supabase.from("load_drivers").select("*").in("load_id", loadIds)
-
-          // Manually join the data
-          const enrichedLoads = loadsData.map((load) => {
-            const customer = customersData?.find((c) => c.id === load.customer_id)
-            const loadDrivers = loadDriversData?.filter((ld) => ld.load_id === load.id) || []
-            const enrichedLoadDrivers = loadDrivers.map((ld) => ({
-              ...ld,
-              driver: driversData?.find((d) => d.id === ld.driver_id),
-            }))
-
-            return {
-              ...load,
-              customer,
-              load_drivers: enrichedLoadDrivers,
-            }
-          })
-
-          setLoads(enrichedLoads)
-        } catch (relationError) {
-          console.warn("Could not fetch related data, using basic loads:", relationError)
-          setLoads(loadsData)
-        }
-      } else {
-        setLoads([])
-      }
+      console.log(`✅ Fetched ${data?.length || 0} loads for company ${user.companyId}`)
+      setLoads(data || [])
     } catch (err: any) {
       console.error("Error fetching loads:", err)
       setError(err.message || "Failed to fetch loads")
@@ -140,13 +112,11 @@ export default function useLoads({ viewMode = "active" }: { viewMode?: "active" 
   const updateLoadStatus = useCallback(
     async (loadId: string, status: string) => {
       try {
-        const companyId = user?.companyId || "550e8400-e29b-41d4-a716-446655440000"
-
         const { error: updateError } = await supabase
           .from("loads")
           .update({ status, updated_at: new Date().toISOString() })
           .eq("id", loadId)
-          .eq("company_id", companyId)
+          .eq("company_id", user?.companyId) // Ensure company isolation
 
         if (updateError) {
           throw updateError
@@ -170,16 +140,14 @@ export default function useLoads({ viewMode = "active" }: { viewMode?: "active" 
 
   const assignDriver = async (loadId: string, driverId: string) => {
     try {
-      const companyId = user?.companyId || "550e8400-e29b-41d4-a716-446655440000"
+      console.log("Assigning driver:", { loadId, driverId, assignedBy: user?.id, companyId: user?.companyId })
 
-      console.log("Assigning driver:", { loadId, driverId, assignedBy: user?.id, companyId })
-
-      // Check if the driver exists
+      // First, check if the driver exists and belongs to the same company
       const { data: driverData, error: driverError } = await supabase
         .from("drivers")
         .select("id, name, status, is_active, company_id")
         .eq("id", driverId)
-        .eq("company_id", companyId)
+        .eq("company_id", user?.companyId) // Ensure driver belongs to same company
         .single()
 
       if (driverError) {
@@ -191,7 +159,9 @@ export default function useLoads({ viewMode = "active" }: { viewMode?: "active" 
         throw new Error("Driver is not active and cannot be assigned")
       }
 
-      // Try the simplified assignment function
+      console.log("Driver data:", driverData)
+
+      // Try the simplified assignment function with company isolation
       const { error: assignError } = await supabase.rpc("assign_driver_to_load_simple", {
         p_load_id: loadId,
         p_driver_id: driverId,
@@ -199,11 +169,11 @@ export default function useLoads({ viewMode = "active" }: { viewMode?: "active" 
       })
 
       if (assignError) {
-        console.error("Error in RPC call:", assignError)
+        console.error("Error in simplified RPC call:", assignError)
         throw new Error(`Error assigning driver: ${assignError.message}`)
       }
 
-      // Refresh the loads data
+      // Refresh the loads data to reflect the changes
       await fetchLoads()
 
       return true
