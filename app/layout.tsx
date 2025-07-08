@@ -1,14 +1,8 @@
 import type React from "react"
-import Providers from "./providers"
+import ClientLayout from "./clientLayout"
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en" suppressHydrationWarning>
-      <body>
-        <Providers>{children}</Providers>
-      </body>
-    </html>
-  )
+  return <ClientLayout>{children}</ClientLayout>
 }
 
 export const metadata = {
