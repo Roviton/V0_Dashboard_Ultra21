@@ -4,18 +4,7 @@ import type React from "react"
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import {
-  BarChart3,
-  Settings,
-  Truck,
-  Shield,
-  LayoutDashboard,
-  Building2,
-  FileText,
-  Users,
-  Bot,
-  Activity,
-} from "lucide-react"
+import { BarChart3, Settings, Truck, Shield, LayoutDashboard, Building2, FileText, Users, Bot } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useAuth } from "@/contexts/auth-context"
@@ -82,12 +71,6 @@ export function Sidebar({ className }: React.HTMLAttributes<HTMLElement>) {
       title: "All Loads",
       icon: <Truck className="mr-2 h-4 w-4" />,
       href: "/dashboard/all-loads",
-      variant: "ghost",
-    },
-    {
-      title: "Dispatcher Monitoring",
-      icon: <Activity className="mr-2 h-4 w-4" />,
-      href: "/dashboard/admin/monitoring",
       variant: "ghost",
     },
     {

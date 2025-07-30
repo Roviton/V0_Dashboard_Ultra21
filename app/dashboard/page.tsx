@@ -2,114 +2,87 @@
 
 import { DashboardStats } from "@/components/dashboard/dashboard-stats"
 import { LoadsDataTable } from "@/components/dashboard/loads-data-table"
+import { EnhancedNewLoadModal } from "@/components/dashboard/modals/enhanced-new-load-modal"
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import useLoads from "@/hooks/use-loads"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/contexts/auth-context"
-import { useRouter, usePathname } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation" // Import usePathname
 import { useToast } from "@/hooks/use-toast"
 import { useEffect } from "react"
 import { ModalProvider } from "@/components/modal-provider"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useModal } from "@/hooks/use-modal"
+import type { DateRange } from "react-day-picker"
 import { Plus } from "lucide-react"
 
 export default function DashboardPage() {
+  const [isNewLoadModalOpen, setIsNewLoadModalOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState("active")
+  const [statusFilter, setStatusFilter] = useState<"active" | "history" | "all">("active")
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined)
 
   const {
-    loads = [],
-    loading = false,
-    error = null,
+    loads,
+    loading,
+    error,
+    createLoad,
     updateLoadStatus,
     assignDriver,
     refetch: refetchLoads,
   } = useLoads({
     viewMode: statusFilter,
-  }) || {}
+  })
 
-  const { user, isLoading: authLoading } = useAuth()
+  const { user, loading: authLoading } = useAuth() // Destructure loading as authLoading
   const router = useRouter()
-  const pathname = usePathname()
+  const pathname = usePathname() // Get current pathname
   const { toast } = useToast()
   const { onOpen } = useModal()
 
   useEffect(() => {
+    // Redirect admin users to the admin dashboard
     if (!authLoading) {
+      // Ensure auth state is resolved
       if (user?.role === "admin") {
         if (pathname !== "/dashboard/admin") {
+          // Check if not already on the target page
           router.push("/dashboard/admin")
         }
       }
-      // Dispatchers stay on /dashboard - no redirect needed
     }
   }, [user, authLoading, router, pathname])
 
   const handleCreateNewLoad = () => {
-    console.log("Dashboard: Create button clicked")
-    console.log("Dashboard: User:", user)
-    console.log("Dashboard: User companyId:", user?.companyId)
-
-    if (!user) {
-      console.log("Dashboard: No user found")
-      toast({
-        title: "Authentication Error",
-        description: "User not authenticated. Please log in again.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (!user.companyId) {
-      console.log("Dashboard: No companyId found")
-      toast({
-        title: "Authentication Error",
-        description: "User company information is missing. Cannot create load.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    console.log("Dashboard: All checks passed, opening modal")
-    onOpen("enhancedNewLoad", {})
+    onOpen("enhancedNewLoad", {
+      onSubmit: async (formData: any) => {
+        try {
+          await createLoad(formData)
+          if (refetchLoads) refetchLoads()
+          toast({ title: "Load Created", description: "New load has been successfully created." })
+        } catch (err) {
+          console.error("Failed to create load from modal:", err)
+          toast({ title: "Error", description: "Failed to create load.", variant: "destructive" })
+        }
+      },
+    })
   }
 
-  const handleAssignDriver = async (loadId, driverId) => {
-    try {
-      await assignDriver(loadId, driverId)
-      toast({
-        title: "Success",
-        description: "Driver assigned successfully",
-      })
-      if (refetchLoads) refetchLoads()
-    } catch (error) {
-      console.error("Error assigning driver:", error)
-      toast({
-        title: "Error",
-        description: "Failed to assign driver",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const filteredLoads = (loads || []).filter((load) => {
+  const filteredLoads = loads.filter((load) => {
     if (!searchTerm) return true
     const lowerSearchTerm = searchTerm.toLowerCase()
     const customerName =
-      typeof load?.customer === "object" && load?.customer !== null
-        ? load.customer.name || ""
-        : String(load?.customer || "")
+      typeof load.customer === "object" && load.customer !== null ? load.customer.name : String(load.customer)
 
     return (
-      load?.load_number?.toLowerCase().includes(lowerSearchTerm) ||
-      load?.reference_number?.toLowerCase().includes(lowerSearchTerm) ||
+      load.load_number?.toLowerCase().includes(lowerSearchTerm) ||
+      load.reference_number?.toLowerCase().includes(lowerSearchTerm) ||
       customerName?.toLowerCase().includes(lowerSearchTerm) ||
-      load?.pickup_city?.toLowerCase().includes(lowerSearchTerm) ||
-      load?.delivery_city?.toLowerCase().includes(lowerSearchTerm)
+      load.pickup_city?.toLowerCase().includes(lowerSearchTerm) ||
+      load.delivery_city?.toLowerCase().includes(lowerSearchTerm)
     )
   })
 
@@ -146,7 +119,7 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      <DashboardStats loads={loads || []} loading={loading || false} />
+      <DashboardStats loads={loads} loading={loading} />
 
       <div>
         <Card>
@@ -165,7 +138,10 @@ export default function DashboardPage() {
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="lg:col-span-1"
                 />
-                <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value)}>
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) => setStatusFilter(value as "active" | "history" | "all")}
+                >
                   <SelectTrigger className="lg:col-span-1">
                     <SelectValue placeholder="Filter by status" />
                   </SelectTrigger>
@@ -187,17 +163,31 @@ export default function DashboardPage() {
               </div>
             ) : (
               <LoadsDataTable
-                loads={filteredLoads || []}
-                loading={loading || false}
-                error={error || null}
+                loads={filteredLoads}
+                loading={loading && loads.length === 0}
+                error={error}
                 onUpdateStatus={updateLoadStatus}
-                onAssignDriver={handleAssignDriver}
               />
             )}
           </CardContent>
         </Card>
       </div>
 
+      <EnhancedNewLoadModal
+        isOpen={isNewLoadModalOpen}
+        onClose={() => setIsNewLoadModalOpen(false)}
+        onSubmit={async (formData: any) => {
+          try {
+            await createLoad(formData)
+            setIsNewLoadModalOpen(false)
+            if (refetchLoads) refetchLoads()
+            toast({ title: "Load Created", description: "New load has been successfully created." })
+          } catch (err) {
+            console.error("Failed to create load:", err)
+            toast({ title: "Error", description: "Failed to create load.", variant: "destructive" })
+          }
+        }}
+      />
       <ModalProvider />
     </div>
   )

@@ -3,15 +3,15 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
 import { supabase } from "@/lib/supabase"
 
-export type UserRole = "admin" | "dispatcher"
+export type UserRole = "dispatcher" | "admin" | "manager" | "accountant"
 
 interface User {
   id: string
   name: string
   email: string
   role: UserRole
-  companyId: string
   avatar?: string
+  companyId?: string // Add this for multi-tenancy
 }
 
 interface AuthContextType {
@@ -20,257 +20,130 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>
   logout: () => void
   hasPermission: (permission: string) => boolean
-  isAdmin: () => boolean
-  isDispatcher: () => boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-// Sample users for MVP testing
+// Sample users for demonstration
 const sampleUsers = [
   {
-    id: "550e8400-e29b-41d4-a716-446655440010",
-    name: "Admin User",
-    email: "admin@example.com",
-    role: "admin" as UserRole,
-    avatar: "/stylized-letters-sj.png",
-    companyId: "550e8400-e29b-41d4-a716-446655440000",
-  },
-  {
-    id: "550e8400-e29b-41d4-a716-446655440011",
+    id: "1",
     name: "John Dispatcher",
     email: "dispatcher@example.com",
+    password: "password",
     role: "dispatcher" as UserRole,
     avatar: "/javascript-code.png",
-    companyId: "550e8400-e29b-41d4-a716-446655440000",
   },
   {
-    id: "550e8400-e29b-41d4-a716-446655440012",
-    name: "Sarah Dispatcher",
-    email: "dispatcher2@example.com",
-    role: "dispatcher" as UserRole,
-    avatar: "/emergency-dispatcher.png",
-    companyId: "550e8400-e29b-41d4-a716-446655440000",
+    id: "2",
+    name: "Admin User",
+    email: "admin@example.com",
+    password: "password",
+    role: "admin" as UserRole,
+    avatar: "/stylized-letters-sj.png",
+  },
+  {
+    id: "3",
+    name: "Manager User",
+    email: "manager@example.com",
+    password: "password",
+    role: "manager" as UserRole,
+    avatar: "/intertwined-letters.png",
+  },
+  {
+    id: "4",
+    name: "Accountant User",
+    email: "accountant@example.com",
+    password: "password",
+    role: "accountant" as UserRole,
+    avatar: "/abstract-geometric-TD.png",
   },
 ]
 
-// Simplified permission mapping for MVP
+// Permission mapping
 const rolePermissions: Record<UserRole, string[]> = {
-  admin: [
-    "*", // All permissions
-  ],
   dispatcher: [
     "view:loads",
-    "create:loads",
-    "edit:loads",
     "assign:drivers",
-    "view:drivers",
-    "view:customers",
     "comment:loads",
+    "view:drivers",
+    "message:drivers",
+    "view:customers",
     "view:basic_reports",
-    "edit:personal_profile",
+    "edit:personal_settings",
   ],
+  admin: ["*"], // All permissions
+  manager: [
+    "view:loads",
+    "edit:loads",
+    "delete:loads",
+    "view:drivers",
+    "edit:drivers",
+    "view:customers",
+    "edit:customers",
+    "view:reports",
+    "edit:settings",
+    "view:financial",
+  ],
+  accountant: ["view:loads", "view:drivers", "view:customers", "view:reports", "view:financial", "edit:financial"],
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
+  // Check for existing session on mount
   useEffect(() => {
-    console.log("🔍 AuthProvider: Checking for existing session...")
-
-    // Check for Supabase session first
-    const checkSupabaseSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-
-      if (session?.user) {
-        console.log("📦 Found Supabase session:", session.user.id)
-
-        // Get user profile from database
-        const { data: profile, error } = await supabase.from("users").select("*").eq("id", session.user.id).single()
-
-        if (profile && !error) {
-          const authenticatedUser: User = {
-            id: profile.id,
-            name: profile.name,
-            email: profile.email,
-            role: profile.role as UserRole,
-            avatar: profile.avatar_url || undefined,
-            companyId: profile.company_id,
-          }
-
-          console.log("✅ Supabase user authenticated:", authenticatedUser.role)
-          setUser(authenticatedUser)
-          setIsLoading(false)
-          return
-        } else {
-          console.log("⚠️ Supabase session exists but no profile found, signing out...")
-          await supabase.auth.signOut()
-        }
-      }
-
-      // Fallback to localStorage for demo users
-      const storedUser = localStorage.getItem("user")
-      if (storedUser) {
-        try {
-          const parsedUser = JSON.parse(storedUser)
-          console.log("📦 Found stored demo user:", parsedUser)
-
-          if (parsedUser && parsedUser.companyId && ["admin", "dispatcher"].includes(parsedUser.role)) {
-            console.log("✅ Valid demo user found:", parsedUser.role)
-            setUser(parsedUser)
-          } else {
-            console.log("❌ Invalid stored user, clearing...")
-            localStorage.removeItem("user")
-          }
-        } catch (e) {
-          console.error("❌ Failed to parse stored user:", e)
-          localStorage.removeItem("user")
-        }
-      }
-
-      setIsLoading(false)
+    const storedUser = localStorage.getItem("user")
+    if (storedUser) {
+      setUser(JSON.parse(storedUser))
     }
-
-    checkSupabaseSession()
-
-    // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("🔄 Auth state changed:", event)
-
-      if (event === "SIGNED_IN" && session?.user) {
-        // Get user profile from database
-        const { data: profile, error } = await supabase.from("users").select("*").eq("id", session.user.id).single()
-
-        if (profile && !error) {
-          const authenticatedUser: User = {
-            id: profile.id,
-            name: profile.name,
-            email: profile.email,
-            role: profile.role as UserRole,
-            avatar: profile.avatar_url || undefined,
-            companyId: profile.company_id,
-          }
-
-          console.log("✅ User signed in:", authenticatedUser.role)
-          setUser(authenticatedUser)
-          localStorage.removeItem("user") // Clear demo user if any
-        } else {
-          console.log("⚠️ User signed in but no profile found, signing out...")
-          await supabase.auth.signOut()
-        }
-      } else if (event === "SIGNED_OUT") {
-        console.log("🚪 User signed out")
-        setUser(null)
-        localStorage.removeItem("user")
-      }
-    })
-
-    return () => subscription.unsubscribe()
+    setIsLoading(false)
   }, [])
 
-  const login = async (email: string, password: string) => {
-    console.log("🔐 Login attempt for:", email)
-    setIsLoading(true)
-
-    try {
-      // Try sample users first for MVP demo
-      const foundSampleUser = sampleUsers.find((u) => u.email === email)
-      if (foundSampleUser && password === "password") {
-        console.log("✅ Found sample user:", foundSampleUser)
-        setUser(foundSampleUser)
-        localStorage.setItem("user", JSON.stringify(foundSampleUser))
-        setIsLoading(false)
-        return
+  // Handle initial redirection based on user role
+  useEffect(() => {
+    if (user && typeof window !== "undefined") {
+      const path = window.location.pathname
+      if (user.role === "admin" && path === "/dashboard") {
+        window.location.href = "/dashboard/admin"
       }
+    }
+  }, [user])
 
-      // Real Supabase authentication for production users
-      console.log("🔍 Attempting Supabase authentication...")
+  const login = async (email: string, password: string) => {
+    setIsLoading(true)
+    try {
+      // First try Supabase authentication
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
 
       if (authError) {
-        console.error("❌ Supabase auth error:", authError)
-        throw new Error("Invalid email or password")
+        // Fallback to sample users for demo
+        const foundUser = sampleUsers.find((u) => u.email === email && u.password === password)
+        if (!foundUser) {
+          throw new Error("Invalid credentials")
+        }
+        const { password: _, ...userWithoutPassword } = foundUser
+        setUser({ ...userWithoutPassword, companyId: "1" }) // Demo company ID
+        localStorage.setItem("user", JSON.stringify({ ...userWithoutPassword, companyId: "1" }))
+        return
       }
 
-      if (!authData.user) {
-        throw new Error("Authentication failed")
-      }
-
-      console.log("✅ Supabase Auth successful, fetching profile...")
-
-      // Enhanced debugging for profile lookup
-      console.log("🔍 Auth user details:", {
-        id: authData.user.id,
-        email: authData.user.email,
-        email_confirmed_at: authData.user.email_confirmed_at,
-        created_at: authData.user.created_at,
-      })
-
-      // Get user profile from database with company info
+      // If Supabase auth succeeds, get user profile
       const { data: profile, error: profileError } = await supabase
         .from("users")
-        .select(`
-        id, name, email, role, company_id, phone, avatar_url, is_active,
-        companies(id, name, dot_number, mc_number)
-      `)
-        .eq("id", authData.user.id)
+        .select("*")
+        .eq("email", email)
         .single()
 
-      if (profileError) {
-        console.error("❌ Profile query failed:", {
-          error: profileError,
-          code: profileError.code,
-          message: profileError.message,
-          details: profileError.details,
-        })
-      } else if (!profile) {
-        console.error("❌ Profile query returned null/undefined")
-      } else {
-        console.log("✅ Profile query successful:", {
-          id: profile.id,
-          email: profile.email,
-          role: profile.role,
-          company_id: profile.company_id,
-          is_active: profile.is_active,
-        })
-      }
-
       if (profileError || !profile) {
-        console.error("❌ Profile lookup error:", profileError)
-
-        // Check if this is a newly registered user who hasn't completed the profile setup
-        if (authData.user.email_confirmed_at) {
-          // User confirmed email but profile doesn't exist - this might be a registration in progress
-          throw new Error("Account setup incomplete. Please contact support or try registering again.")
-        } else {
-          // User exists in auth but no profile and email not confirmed
-          throw new Error("Please check your email to confirm your account before signing in.")
-        }
+        throw new Error("User profile not found")
       }
 
-      if (!profile.company_id) {
-        throw new Error("User account is not associated with a company. Please contact support.")
-      }
-
-      if (!["admin", "dispatcher"].includes(profile.role)) {
-        throw new Error("Invalid user role for this system. Please contact support.")
-      }
-
-      if (!profile.is_active) {
-        throw new Error("Your account has been deactivated. Please contact your administrator.")
-      }
-
-      console.log("✅ Profile found:", profile.email, "Role:", profile.role)
-
-      const authenticatedUser: User = {
+      const user = {
         id: profile.id,
         name: profile.name,
         email: profile.email,
@@ -279,43 +152,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         companyId: profile.company_id,
       }
 
-      console.log("✅ Real user authenticated:", authenticatedUser.role)
-      setUser(authenticatedUser)
-      localStorage.removeItem("user") // Clear any demo user data
+      setUser(user)
+      localStorage.setItem("user", JSON.stringify(user))
     } catch (error) {
-      console.error("❌ Login failed:", error)
+      console.error("Login failed:", error)
       throw error
     } finally {
       setIsLoading(false)
     }
   }
 
-  const logout = async () => {
-    console.log("🚪 Logging out...")
+  const logout = () => {
     setUser(null)
     localStorage.removeItem("user")
-    await supabase.auth.signOut()
-
-    // Redirect to the official sign-in page
-    if (typeof window !== "undefined") {
-      window.location.href = "/auth/signin"
-    }
   }
 
   const hasPermission = (permission: string) => {
     if (!user) return false
+
     const userPermissions = rolePermissions[user.role]
+
+    // Admin has all permissions
     if (userPermissions.includes("*")) return true
+
     return userPermissions.includes(permission)
   }
 
-  const isAdmin = () => user?.role === "admin"
-  const isDispatcher = () => user?.role === "dispatcher"
-
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout, hasPermission, isAdmin, isDispatcher }}>
-      {children}
-    </AuthContext.Provider>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, hasPermission }}>{children}</AuthContext.Provider>
   )
 }
 

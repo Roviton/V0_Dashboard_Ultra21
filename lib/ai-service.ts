@@ -116,66 +116,6 @@ export async function testAPIKeys() {
 }
 
 /**
- * Enhanced JSON extraction with multiple fallback strategies
- */
-function extractJSONFromResponse(text: string): any {
-  console.log("Raw AI response:", text.substring(0, 500) + "...")
-
-  // Strategy 1: Try to find JSON between code blocks
-  const codeBlockMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/i)
-  if (codeBlockMatch) {
-    try {
-      console.log("Found JSON in code block")
-      return JSON.parse(codeBlockMatch[1])
-    } catch (error) {
-      console.log("Failed to parse JSON from code block:", error)
-    }
-  }
-
-  // Strategy 2: Find the largest JSON object in the response
-  const jsonMatches = text.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g)
-  if (jsonMatches) {
-    // Sort by length and try the largest first
-    const sortedMatches = jsonMatches.sort((a, b) => b.length - a.length)
-
-    for (const match of sortedMatches) {
-      try {
-        console.log("Trying JSON match:", match.substring(0, 100) + "...")
-        return JSON.parse(match)
-      } catch (error) {
-        console.log("Failed to parse JSON match:", error)
-        continue
-      }
-    }
-  }
-
-  // Strategy 3: Try to extract JSON from the entire response
-  try {
-    console.log("Trying to parse entire response as JSON")
-    return JSON.parse(text)
-  } catch (error) {
-    console.log("Failed to parse entire response as JSON:", error)
-  }
-
-  // Strategy 4: Try to clean and extract JSON
-  const cleanedText = text
-    .replace(/^[^{]*/, "") // Remove everything before first {
-    .replace(/[^}]*$/, "") // Remove everything after last }
-    .trim()
-
-  if (cleanedText.startsWith("{") && cleanedText.endsWith("}")) {
-    try {
-      console.log("Trying cleaned JSON")
-      return JSON.parse(cleanedText)
-    } catch (error) {
-      console.log("Failed to parse cleaned JSON:", error)
-    }
-  }
-
-  throw new Error("Could not extract valid JSON from AI response")
-}
-
-/**
  * Enhanced OCR extraction - supports both images and PDFs
  */
 export async function extractBillOfLadingData(dataUrl: string) {
@@ -229,7 +169,7 @@ Extract ALL relevant information and return it as a JSON object with this exact 
   "specialInstructions": "string or null"
 }
 
-CRITICAL: Return ONLY the JSON object, no other text, explanations, or formatting. Use null for any fields you cannot find.`
+IMPORTANT: Use null for any fields you cannot find. Do not use empty strings or undefined. Return ONLY the JSON object, no other text.`
 
     // Check API key availability first
     const openaiKey = process.env.OPENAI_API_KEY
@@ -257,7 +197,7 @@ CRITICAL: Return ONLY the JSON object, no other text, explanations, or formattin
               content: [
                 {
                   type: "text",
-                  text: "Extract all freight information from this PDF document. Pay special attention to distinguishing between carrier, broker, pickup location, and delivery location. Return only valid JSON with null for missing fields.",
+                  text: "Extract all freight information from this PDF document. Pay special attention to distinguishing between carrier, broker, pickup location, and delivery location. Use null for any fields you cannot find.",
                 },
                 {
                   type: "file",
@@ -271,18 +211,21 @@ CRITICAL: Return ONLY the JSON object, no other text, explanations, or formattin
           temperature: 0.1,
         })
 
-        console.log("OpenAI PDF response received")
+        console.log("OpenAI PDF response received:", result.text.substring(0, 200) + "...")
 
         if (result.text) {
-          const data = extractJSONFromResponse(result.text)
-          const cleanedData = cleanExtractedData(data)
-          const validatedData = billOfLadingSchema.parse(cleanedData)
+          const jsonMatch = result.text.match(/\{[\s\S]*\}/)
+          if (jsonMatch) {
+            const data = JSON.parse(jsonMatch[0])
+            const cleanedData = cleanExtractedData(data)
+            const validatedData = billOfLadingSchema.parse(cleanedData)
 
-          return {
-            success: true,
-            data: validatedData,
-            processingMethod: "openai-pdf",
-            model: "gpt-4o",
+            return {
+              success: true,
+              data: validatedData,
+              processingMethod: "openai-pdf",
+              model: "gpt-4o",
+            }
           }
         }
       } catch (pdfError) {
@@ -317,7 +260,7 @@ CRITICAL: Return ONLY the JSON object, no other text, explanations, or formattin
                 content: [
                   {
                     type: "text",
-                    text: "Extract all freight information from this document image. Pay special attention to distinguishing between carrier, broker, pickup location, and delivery location. Return only valid JSON with null for missing fields.",
+                    text: "Extract all freight information from this document image. Pay special attention to distinguishing between carrier, broker, pickup location, and delivery location. Use null for any fields you cannot find.",
                   },
                   {
                     type: "image",
@@ -330,18 +273,21 @@ CRITICAL: Return ONLY the JSON object, no other text, explanations, or formattin
             temperature: 0.1,
           })
 
-          console.log("Claude response received")
+          console.log("Claude response received:", result.text.substring(0, 200) + "...")
 
           if (result.text) {
-            const data = extractJSONFromResponse(result.text)
-            const cleanedData = cleanExtractedData(data)
-            const validatedData = billOfLadingSchema.parse(cleanedData)
+            const jsonMatch = result.text.match(/\{[\s\S]*\}/)
+            if (jsonMatch) {
+              const data = JSON.parse(jsonMatch[0])
+              const cleanedData = cleanExtractedData(data)
+              const validatedData = billOfLadingSchema.parse(cleanedData)
 
-            return {
-              success: true,
-              data: validatedData,
-              processingMethod: "claude-vision",
-              model: "claude-3.5-sonnet",
+              return {
+                success: true,
+                data: validatedData,
+                processingMethod: "claude-vision",
+                model: "claude-3.5-sonnet",
+              }
             }
           }
         } catch (claudeError) {
@@ -364,7 +310,7 @@ CRITICAL: Return ONLY the JSON object, no other text, explanations, or formattin
               content: [
                 {
                   type: "text",
-                  text: "Extract all freight information from this document image. Pay special attention to distinguishing between carrier, broker, pickup location, and delivery location. Return only valid JSON with null for missing fields.",
+                  text: "Extract all freight information from this document image. Pay special attention to distinguishing between carrier, broker, pickup location, and delivery location. Use null for any fields you cannot find.",
                 },
                 {
                   type: "image",
@@ -377,19 +323,22 @@ CRITICAL: Return ONLY the JSON object, no other text, explanations, or formattin
           temperature: 0.1,
         })
 
-        console.log("OpenAI response received")
+        console.log("OpenAI response received:", result.text.substring(0, 200) + "...")
 
         if (result.text) {
-          const data = extractJSONFromResponse(result.text)
-          const cleanedData = cleanExtractedData(data)
-          const validatedData = billOfLadingSchema.parse(cleanedData)
+          const jsonMatch = result.text.match(/\{[\s\S]*\}/)
+          if (jsonMatch) {
+            const data = JSON.parse(jsonMatch[0])
+            const cleanedData = cleanExtractedData(data)
+            const validatedData = billOfLadingSchema.parse(cleanedData)
 
-          return {
-            success: true,
-            data: validatedData,
-            processingMethod: "openai-vision",
-            model: "gpt-4o",
-            usedFallback: true,
+            return {
+              success: true,
+              data: validatedData,
+              processingMethod: "openai-vision",
+              model: "gpt-4o",
+              usedFallback: true,
+            }
           }
         }
       }
@@ -510,216 +459,138 @@ function cleanExtractedData(data: any): any {
   return data
 }
 
-// Helper function to format date for display
-function formatDate(dateString: string | null | undefined): string {
-  if (!dateString) return "Not specified"
+// Generate broker email using available AI service
+export async function generateBrokerEmail(loadDetails: any) {
   try {
-    const date = new Date(dateString)
-    return date.toLocaleDateString("en-US", {
-      month: "numeric",
-      day: "numeric",
-      year: "numeric",
-    })
-  } catch (e) {
-    return dateString
+    console.log("generateBrokerEmail called with:", JSON.stringify(loadDetails, null, 2))
+
+    const brokerName = loadDetails.broker?.name || loadDetails.consignee?.name || "there"
+    const brokerEmail = loadDetails.broker?.email || loadDetails.consignee?.email || "broker@example.com"
+    const driverName = loadDetails.driver?.name || "our driver"
+    const loadNumber = loadDetails.loadNumber || "L-XXXX"
+
+    // Try Anthropic first, then OpenAI
+    const anthropicKey = process.env.ANTHROPIC_API_KEY
+    const openaiKey = process.env.OPENAI_API_KEY
+
+    const emailPrompt = `Generate a professional, concise email to the broker with this format:
+
+To: ${brokerEmail}
+Subject: Load ${loadNumber} - Status Update
+
+Hello ${brokerName.split(" ")[0] || "there"},
+
+I wanted to update you on load ${loadNumber}. Our driver ${driverName} has successfully completed pickup and is now en route to the delivery destination.
+
+Current Status: En Route
+Pickup Completed: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
+Estimated Delivery: ${loadDetails.deliveryDate || "TBD"}
+Route: ${loadDetails.pickupLocation?.address || "Pickup Location"}, ${loadDetails.pickupLocation?.city || ""} ${
+      loadDetails.pickupLocation?.state || ""
+    } → ${loadDetails.deliveryLocation?.address || "Delivery Location"}, ${
+      loadDetails.deliveryLocation?.city || ""
+    } ${loadDetails.deliveryLocation?.state || ""}
+
+The load is secure and we're tracking progress in real-time. I'll send another update when the driver arrives at the delivery location.
+
+Best regards,
+Forward Strong LLC Dispatch`
+
+    if (anthropicKey) {
+      console.log("Generating email with Claude...")
+      const { text } = await generateText({
+        model: anthropic(AI_MODELS.ANTHROPIC_CLAUDE),
+        prompt: emailPrompt,
+        maxTokens: 400,
+      })
+
+      console.log("Claude email response:", text)
+      return { success: true, email: text }
+    } else if (openaiKey) {
+      console.log("Generating email with OpenAI...")
+      const { text } = await generateText({
+        model: openai(AI_MODELS.OPENAI_GPT4O),
+        prompt: emailPrompt,
+        maxTokens: 400,
+      })
+
+      console.log("OpenAI email response:", text)
+      return { success: true, email: text }
+    } else {
+      throw new Error("No AI API keys available")
+    }
+  } catch (error) {
+    console.error("generateBrokerEmail error:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    }
   }
 }
 
-// Helper function to format location
-function formatLocation(location: any): string {
-  if (!location) return "Not specified"
-
-  const parts = []
-  if (location.city) parts.push(location.city)
-  if (location.state) parts.push(location.state)
-
-  return parts.length > 0 ? parts.join(", ") : "Not specified"
-}
-
-// Update the extractLoadData function to prioritize reference numbers and include hours
-function extractLoadData(loadData: any) {
-  console.log("Extracting load data:", JSON.stringify(loadData, null, 2))
-
-  // Use reference number instead of load number
-  const referenceNumber = loadData?.reference_number || loadData?.load_number || loadData?.loadNumber || "Unknown"
-
-  // Get customer name from database
-  const customerName = loadData?.customer?.name || loadData?.customer_name || "Unknown Customer"
-
-  // Format pickup and delivery locations
-  const pickupLocation = `${loadData?.pickup_city || "Unknown"}, ${loadData?.pickup_state || "Unknown"}`
-  const deliveryLocation = `${loadData?.delivery_city || "Unknown"}, ${loadData?.delivery_state || "Unknown"}`
-
-  // Get dates
-  const pickupDate = formatDate(loadData?.pickup_date)
-  const deliveryDate = formatDate(loadData?.delivery_date)
-
-  // Get pickup and delivery hours
-  const pickupHours = loadData?.pickup_hours || loadData?.pickup_time || "Hours not specified"
-  const deliveryHours = loadData?.delivery_hours || loadData?.delivery_time || "Hours not specified"
-
-  // Get driver info
-  const driverName = loadData?.driver?.name || loadData?.driver_name || "Unassigned"
-
-  // Get status
-  const status = loadData?.status || "Unknown"
-
-  // Get rate
-  const rate = loadData?.rate ? `$${loadData.rate}` : "Rate not specified"
-
-  // Get special instructions
-  const specialInstructions = loadData?.special_instructions || "None"
-
-  // Get commodity
-  const commodity = loadData?.commodity || "Not specified"
-
-  // Get weight
-  const weight = loadData?.weight ? `${loadData.weight} lbs` : "Not specified"
-
-  // Get broker info from uploaded document if available
-  const brokerName = loadData?.broker_name || "Broker"
-  const brokerEmail = loadData?.broker_email || ""
-
-  return {
-    referenceNumber,
-    customerName,
-    pickupLocation,
-    deliveryLocation,
-    pickupDate,
-    deliveryDate,
-    pickupHours,
-    deliveryHours,
-    driverName,
-    status,
-    rate,
-    specialInstructions,
-    commodity,
-    weight,
-    brokerName,
-    brokerEmail,
-    pickupAddress: loadData?.pickup_address || "Address not specified",
-    deliveryAddress: loadData?.delivery_address || "Address not specified",
-  }
-}
-
-// Update the broker email generation function to use reference number
-export async function generateBrokerEmail(loadData: any) {
+// Generate driver instructions using available AI service
+export async function generateDriverInstructions(loadDetails: any) {
   try {
-    console.log("Generating broker email for load:", JSON.stringify(loadData, null, 2))
+    console.log("generateDriverInstructions called with:", JSON.stringify(loadDetails, null, 2))
 
-    const load = extractLoadData(loadData)
+    const loadNumber = loadDetails.loadNumber || "N/A"
 
-    const prompt = `Write a professional email to the broker regarding Reference #${load.referenceNumber}.
+    // Try Anthropic first, then OpenAI
+    const anthropicKey = process.env.ANTHROPIC_API_KEY
+    const openaiKey = process.env.OPENAI_API_KEY
+
+    const instructionsPrompt = `Create concise, practical driver instructions:
+
+LOAD: ${loadNumber}
+
+PICKUP INFORMATION:
+- Location: ${loadDetails.pickupLocation?.address || "Pickup Location"}
+- Special Instructions: ${loadDetails.specialInstructions || "Standard pickup procedures"}
+
+DELIVERY INFORMATION:
+- Location: ${loadDetails.deliveryLocation?.address || "Delivery Location"}
+- Special Instructions: ${loadDetails.specialInstructions || "Standard delivery procedures"}
 
 LOAD DETAILS:
-- Reference #: ${load.referenceNumber}
-- Customer: ${load.customerName}
-- Status: ${load.status}
-- Driver: ${load.driverName}
-- Route: ${load.pickupLocation} → ${load.deliveryLocation}
-- Pickup Date: ${load.pickupDate}
-- Delivery Date: ${load.deliveryDate}
-- Rate: ${load.rate}
+- Commodity: ${loadDetails.commodity || "Vehicle"}
+- VIN (if applicable): ${loadDetails.vin || "See BOL"}
+- Special Handling: ${loadDetails.specialInstructions || "Follow standard procedures"}
 
-Write a concise, professional email that:
-1. References the specific reference number
-2. Mentions the customer name
-3. Provides a status update
-4. Includes pickup and delivery information
-5. Mentions the assigned driver
-6. Asks for any additional requirements or confirmations
+IMPORTANT REMINDERS:
+- Complete vehicle inspection at pickup and delivery
+- Take photos of any existing damage
+- Secure vehicle properly for transport
 
-Keep it brief and professional. Address it to "${load.brokerName}" if available.`
+Keep it brief, practical, and driver-focused.`
 
-    const { text } = await generateText({
-      model: openai("gpt-4o"),
-      prompt,
-      temperature: 0.3,
-      maxTokens: 500,
-    })
+    if (anthropicKey) {
+      console.log("Generating instructions with Claude...")
+      const { text } = await generateText({
+        model: anthropic(AI_MODELS.ANTHROPIC_CLAUDE),
+        prompt: instructionsPrompt,
+        maxTokens: 500,
+      })
 
-    return {
-      success: true,
-      email: text,
+      console.log("Claude instructions response:", text)
+      return { success: true, instructions: text }
+    } else if (openaiKey) {
+      console.log("Generating instructions with OpenAI...")
+      const { text } = await generateText({
+        model: openai(AI_MODELS.OPENAI_GPT4O),
+        prompt: instructionsPrompt,
+        maxTokens: 500,
+      })
+
+      console.log("OpenAI instructions response:", text)
+      return { success: true, instructions: text }
+    } else {
+      throw new Error("No AI API keys available")
     }
   } catch (error) {
-    console.error("Error generating broker email:", error)
+    console.error("generateDriverInstructions error:", error)
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error occurred",
-    }
-  }
-}
-
-// Update the driver instructions function to use reference number and include hours
-export async function generateDriverInstructions(loadData: any) {
-  try {
-    console.log("Generating driver instructions for load:", JSON.stringify(loadData, null, 2))
-
-    const load = extractLoadData(loadData)
-
-    const prompt = `Create brief, focused driver instructions for Reference #${load.referenceNumber}.
-
-LOAD DETAILS:
-- Reference #: ${load.referenceNumber}
-- Customer: ${load.customerName}
-- Route: ${load.pickupLocation} → ${load.deliveryLocation}
-- Pickup: ${load.pickupAddress} on ${load.pickupDate}
-- Pickup Hours: ${load.pickupHours}
-- Delivery: ${load.deliveryAddress} on ${load.deliveryDate}
-- Delivery Hours: ${load.deliveryHours}
-- Commodity: ${load.commodity}
-- Weight: ${load.weight}
-- Special Instructions: ${load.specialInstructions}
-
-Format as bullet points with only essential information:
-• Reference number and customer
-• Pickup location, date, and hours
-• Delivery location, date, and hours
-• Any special handling requirements
-• Key contact information if available
-• Important delivery instructions
-
-Keep it concise - maximum 7 bullet points with essential details only.`
-
-    const { text } = await generateText({
-      model: openai("gpt-4o"),
-      prompt,
-      temperature: 0.3,
-      maxTokens: 400,
-    })
-
-    return {
-      success: true,
-      instructions: text,
-    }
-  } catch (error) {
-    console.error("Error generating driver instructions:", error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error occurred",
-    }
-  }
-}
-
-export async function testAIConnection() {
-  try {
-    const { text } = await generateText({
-      model: openai("gpt-4o"),
-      prompt: "Respond with 'AI connection successful' if you can read this message.",
-      temperature: 0,
-      maxTokens: 20,
-    })
-
-    return {
-      success: true,
-      message: text,
-    }
-  } catch (error) {
-    console.error("AI connection test failed:", error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error occurred",
+      error: error instanceof Error ? error.message : "Unknown error",
     }
   }
 }

@@ -1,129 +1,96 @@
 "use client"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { DollarSign, Package, CheckCircle, TrendingUp } from "lucide-react"
-import useLoads from "@/hooks/use-loads"
-import { useMemo } from "react"
+import { TrendingUp, TrendingDown, DollarSign, Truck, Users } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 interface DashboardStatsProps {
+  loads: any[]
   className?: string
 }
 
-export function DashboardStats({ className }: DashboardStatsProps) {
-  // Use the SAME data source as the loads table
-  const { loads: activeLoads, loading: activeLoading } = useLoads({ viewMode: "active" })
-  const { loads: completedLoads, loading: completedLoading } = useLoads({ viewMode: "history" })
+export function DashboardStats({ loads, className }: DashboardStatsProps) {
+  // Calculate stats safely
+  const totalLoads = loads.length
+  const activeLoads = loads.filter(
+    (load) =>
+      load.status === "new" ||
+      load.status === "assigned" ||
+      load.status === "accepted" ||
+      load.status === "in_progress",
+  ).length
 
-  // Calculate metrics from the SAME data that tables use
-  const metrics = useMemo(() => {
-    console.log("📊 Calculating dashboard metrics...")
-    console.log("Active loads:", activeLoads?.length || 0)
-    console.log("History loads:", completedLoads?.length || 0)
+  const completedLoads = loads.filter((load) => load.status === "completed").length
 
-    // Active loads count (same filter as Active Loads table)
-    const activeCount = activeLoads?.length || 0
+  const unassignedLoads = loads.filter((load) => !load.load_drivers || load.load_drivers.length === 0).length
 
-    // Only count loads that are actually completed
-    const actuallyCompletedLoads = completedLoads?.filter((load) => load.status === "completed") || []
-    const completedCount = actuallyCompletedLoads.length
+  // Calculate average rate safely
+  const loadsWithRates = loads.filter((load) => load.rate && typeof load.rate === "number")
+  const averageRate =
+    loadsWithRates.length > 0 ? loadsWithRates.reduce((sum, load) => sum + load.rate, 0) / loadsWithRates.length : 0
 
-    console.log("Actually completed loads:", completedCount)
+  // Calculate total revenue from completed loads
+  const completedLoadsWithRates = loads.filter(
+    (load) => load.status === "completed" && load.rate && typeof load.rate === "number",
+  )
+  const totalRevenue = completedLoadsWithRates.reduce((sum, load) => sum + load.rate, 0)
 
-    // Calculate total revenue from ONLY completed loads
-    const totalRevenue = actuallyCompletedLoads.reduce((sum, load) => {
-      if (load.rate) {
-        const rate = typeof load.rate === "string" ? Number.parseFloat(load.rate.replace(/[$,]/g, "")) : load.rate
-        const validRate = isNaN(rate) ? 0 : rate
-        console.log(`Completed Load ${load.load_number}: rate = ${validRate}`)
-        return sum + validRate
-      }
-      return sum
-    }, 0)
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+    }).format(amount)
+  }
 
-    console.log("Total revenue from completed loads:", totalRevenue)
-
-    // Calculate average rate from ACTIVE loads with rates
-    const activeLoadsWithRates = (activeLoads || []).filter((load) => {
-      if (!load.rate) return false
-      const rate = typeof load.rate === "string" ? Number.parseFloat(load.rate.replace(/[$,]/g, "")) : load.rate
-      return !isNaN(rate) && rate > 0
-    })
-
-    console.log("Active loads with valid rates:", activeLoadsWithRates.length)
-
-    const averageRate =
-      activeLoadsWithRates.length > 0
-        ? activeLoadsWithRates.reduce((sum, load) => {
-            const rate = typeof load.rate === "string" ? Number.parseFloat(load.rate.replace(/[$,]/g, "")) : load.rate
-            console.log(`Active Load ${load.load_number}: rate = ${rate}`)
-            return sum + rate
-          }, 0) / activeLoadsWithRates.length
-        : 0
-
-    console.log("Average rate from active loads:", averageRate)
-
-    return {
-      activeCount,
-      completedCount,
-      totalRevenue,
-      averageRate,
-      activeLoadsWithRates: activeLoadsWithRates.length,
-    }
-  }, [activeLoads, completedLoads])
-
-  const isLoading = activeLoading || completedLoading
+  const stats = [
+    {
+      title: "Active Loads",
+      value: activeLoads.toString(),
+      description: "Currently active",
+      icon: Truck,
+      trend: activeLoads > 0 ? "up" : "neutral",
+    },
+    {
+      title: "Pending Assignment",
+      value: unassignedLoads.toString(),
+      description: "Awaiting driver assignment",
+      icon: Users,
+      trend: unassignedLoads > 0 ? "down" : "up",
+    },
+    {
+      title: "Average Rate",
+      value: formatCurrency(averageRate),
+      description: "Per load average",
+      icon: DollarSign,
+      trend: "neutral",
+    },
+    {
+      title: "Total Revenue",
+      value: formatCurrency(totalRevenue),
+      description: `From ${completedLoads} completed loads`,
+      icon: TrendingUp,
+      trend: totalRevenue > 0 ? "up" : "neutral",
+    },
+  ]
 
   return (
-    <div className={`grid gap-4 md:grid-cols-2 lg:grid-cols-4 ${className}`}>
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Active Loads</CardTitle>
-          <Package className="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{isLoading ? "..." : metrics.activeCount}</div>
-          <p className="text-xs text-muted-foreground">Currently active</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Completed Loads</CardTitle>
-          <CheckCircle className="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{isLoading ? "..." : metrics.completedCount}</div>
-          <p className="text-xs text-muted-foreground">Successfully delivered</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-          <DollarSign className="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{isLoading ? "..." : `$${metrics.totalRevenue.toLocaleString()}`}</div>
-          <p className="text-xs text-muted-foreground">From {metrics.completedCount} completed loads</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Average Rate</CardTitle>
-          <TrendingUp className="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">
-            {isLoading ? "..." : metrics.activeLoadsWithRates > 0 ? `$${metrics.averageRate.toFixed(2)}` : "$0.00"}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {metrics.activeLoadsWithRates > 0
-              ? `Average from ${metrics.activeLoadsWithRates} active loads`
-              : "No active loads with rates"}
-          </p>
-        </CardContent>
-      </Card>
+    <div className={cn("grid gap-4 md:grid-cols-2 lg:grid-cols-4", className)}>
+      {stats.map((stat, index) => (
+        <Card key={index}>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">{stat.title}</CardTitle>
+            <stat.icon className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stat.value}</div>
+            <p className="text-xs text-muted-foreground flex items-center">
+              {stat.trend === "up" && <TrendingUp className="h-3 w-3 mr-1 text-green-500" />}
+              {stat.trend === "down" && <TrendingDown className="h-3 w-3 mr-1 text-red-500" />}
+              {stat.description}
+            </p>
+          </CardContent>
+        </Card>
+      ))}
     </div>
   )
 }

@@ -1,58 +1,76 @@
-// Content from the newly attached monaco-environment-soyD4CxfcRdnfv3huXYKsIJhWUdnWY.tsx
-// Ensure this file is imported at the VERY TOP of your app/layout.tsx
-// e.g., import '@/lib/monaco-environment';
+// This is a simplified version based on common Monaco setup.
+// If your attached monaco-environment-....ts file has a more specific setup,
+// you might need to adapt this.
 
+// Import worker scripts. The paths might need adjustment based on how they are
+// bundled or made available in your Next.js setup.
+// In a typical Webpack/Next.js setup, these imports would make the worker files
+// available. For Next.js, we might need a slightly different approach if direct
+// imports don't work as expected for worker instantiation.
+
+// For Next.js, it's often easier to rely on CDN-hosted workers if local bundling is complex.
+// However, let's try the import-based approach first, as it's cleaner if supported.
+
+// Ensure these are actual paths to your monaco worker entry points if you have them locally.
+// If not, we'll fall back to a CDN approach.
+// import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
+// import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
+// import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
+// import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
+// import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
+
+// Self configuration for MonacoEnvironment
 if (typeof self !== "undefined" && typeof self.MonacoEnvironment === "undefined") {
-  console.log("Configuring MonacoEnvironment...")
   self.MonacoEnvironment = {
     getWorker: (_moduleId: any, label: string) => {
-      let workerPath
+      // Standard worker paths, assuming they are served from the root or a known path.
+      // In Next.js, these might need to be adjusted or loaded via CDN.
+      // This is a common setup that might need tweaking for Next.js's specific serving.
       if (label === "json") {
-        workerPath = "monaco-editor/esm/vs/language/json/json.worker.js"
-      } else if (label === "css" || label === "scss" || label === "less") {
-        workerPath = "monaco-editor/esm/vs/language/css/css.worker.js"
-      } else if (label === "html" || label === "handlebars" || label === "razor") {
-        workerPath = "monaco-editor/esm/vs/language/html/html.worker.js"
-      } else if (label === "typescript" || label === "javascript") {
-        workerPath = "monaco-editor/esm/vs/language/typescript/ts.worker.js"
-      } else {
-        workerPath = "monaco-editor/esm/vs/editor/editor.worker.js"
-      }
-
-      try {
-        // Using new URL with import.meta.url is generally preferred for module environments
-        const workerUrl = new URL(workerPath, import.meta.url)
-        // console.log(`Creating worker for label: ${label}, path: ${workerUrl.href}`);
-        return new Worker(workerUrl, {
+        return new Worker(new URL("monaco-editor/esm/vs/language/json/json.worker.js", import.meta.url), {
           type: "module",
-          name: `${label}-worker`,
         })
-      } catch (e) {
-        console.error(`Failed to create worker for label ${label} with path ${workerPath}`, e)
-        // Fallback or alternative loading strategy if new URL fails in some contexts
-        // This part might need adjustment based on how Next.js bundles/serves these workers.
-        // For now, we'll let it throw if the primary method fails, to make the error obvious.
-        throw e
       }
+      if (label === "css" || label === "scss" || label === "less") {
+        return new Worker(new URL("monaco-editor/esm/vs/language/css/css.worker.js", import.meta.url), {
+          type: "module",
+        })
+      }
+      if (label === "html" || label === "handlebars" || label === "razor") {
+        return new Worker(new URL("monaco-editor/esm/vs/language/html/html.worker.js", import.meta.url), {
+          type: "module",
+        })
+      }
+      if (label === "typescript" || label === "javascript") {
+        return new Worker(new URL("monaco-editor/esm/vs/language/typescript/ts.worker.js", import.meta.url), {
+          type: "module",
+        })
+      }
+      return new Worker(new URL("monaco-editor/esm/vs/editor/editor.worker.js", import.meta.url), { type: "module" })
     },
   }
-} else if (typeof self !== "undefined") {
-  // console.log("MonacoEnvironment already configured or self is undefined.");
 }
 
-// Optional: A function to explicitly ensure the environment is set up.
+// This function can be called to ensure the environment is set.
 export function ensureMonacoEnvironment() {
-  if (
-    typeof self !== "undefined" &&
-    typeof self.MonacoEnvironment === "object" &&
-    typeof self.MonacoEnvironment.getWorker === "function"
-  ) {
-    console.log("MonacoEnvironment is configured.")
-  } else {
-    console.warn("MonacoEnvironment is NOT configured correctly.")
+  // The self-configuration above should handle it.
+  // This function is mostly for explicit initialization if needed.
+  if (typeof self !== "undefined" && typeof self.MonacoEnvironment === "undefined") {
+    console.warn("MonacoEnvironment was not set by self-configuration. Attempting explicit setup.")
+    // Fallback or more explicit setup could go here if the above doesn't work.
   }
 }
 
-// To initialize, import this file once in your application's main entry point,
-// for example, at the very top of your root layout.tsx.
-// import '@/lib/monaco-environment';
+// Alternative using getWorkerUrl (often simpler if workers are just static files)
+// if (typeof self !== 'undefined' && typeof self.MonacoEnvironment === 'undefined') {
+//   self.MonacoEnvironment = {
+//     getWorkerUrl: function (moduleId, label) {
+//       const prefix = '/_next/static/chunks/monaco-editor-workers/'; // Example path
+//       if (label === 'json') {
+//         return `${prefix}json.worker.js`;
+//       }
+//       // ... other workers
+//       return `${prefix}editor.worker.js`;
+//     }
+//   };
+// }

@@ -1,21 +1,20 @@
 import type React from "react"
-import ClientLayout from "./client-layout"
+import "@/app/globals.css"
+import { ThemeProvider } from "@/components/theme-provider"
+import { AuthProvider } from "@/contexts/auth-context"
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
-        <ClientLayout>{children}</ClientLayout>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <AuthProvider>{children}</AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   )
 }
 
 export const metadata = {
-  title: "Freight Dispatcher Dashboard",
-  description: "Manage your freight dispatching operations efficiently.",
-  generator: "v0.dev",
-}
-
-
-import './globals.css'
+      generator: 'v0.dev'
+    };

@@ -4,7 +4,8 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
-import { Copy, Mail, Loader2, MapPin } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Copy, Mail, FileText, Loader2 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 
 interface AICommunicationPanelProps {
@@ -19,28 +20,15 @@ export function AICommunicationPanel({ load }: AICommunicationPanelProps) {
   const { toast } = useToast()
 
   const generateBrokerEmail = async () => {
-    if (!load || !load.id) {
-      toast({
-        title: "Error",
-        description: "No load data available. Please try again.",
-        variant: "destructive",
-      })
-      return
-    }
-
     setIsGeneratingEmail(true)
     try {
-      console.log("Sending load data to broker email API:", load)
       const response = await fetch("/api/ai/broker-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ loadData: load }),
+        body: JSON.stringify({ load }),
       })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to generate email")
-      }
+      if (!response.ok) throw new Error("Failed to generate email")
 
       const data = await response.json()
       setBrokerEmail(data.email)
@@ -49,10 +37,9 @@ export function AICommunicationPanel({ load }: AICommunicationPanelProps) {
         description: "Broker email has been generated successfully.",
       })
     } catch (error) {
-      console.error("Error generating broker email:", error)
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to generate broker email.",
+        description: "Failed to generate broker email.",
         variant: "destructive",
       })
     } finally {
@@ -61,28 +48,15 @@ export function AICommunicationPanel({ load }: AICommunicationPanelProps) {
   }
 
   const generateDriverInstructions = async () => {
-    if (!load || !load.id) {
-      toast({
-        title: "Error",
-        description: "No load data available. Please try again.",
-        variant: "destructive",
-      })
-      return
-    }
-
     setIsGeneratingInstructions(true)
     try {
-      console.log("Sending load data to driver instructions API:", load)
       const response = await fetch("/api/ai/driver-instructions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ loadData: load }),
+        body: JSON.stringify({ load }),
       })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to generate instructions")
-      }
+      if (!response.ok) throw new Error("Failed to generate instructions")
 
       const data = await response.json()
       setDriverInstructions(data.instructions)
@@ -91,10 +65,9 @@ export function AICommunicationPanel({ load }: AICommunicationPanelProps) {
         description: "Driver instructions have been generated successfully.",
       })
     } catch (error) {
-      console.error("Error generating driver instructions:", error)
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to generate driver instructions.",
+        description: "Failed to generate driver instructions.",
         variant: "destructive",
       })
     } finally {
@@ -119,21 +92,23 @@ export function AICommunicationPanel({ load }: AICommunicationPanelProps) {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* Broker Email Card */}
-      <Card className="border border-gray-200">
-        <CardHeader className="pb-4">
-          <CardTitle className="text-xl font-semibold text-gray-900">Broker Email</CardTitle>
-          <CardDescription className="text-gray-600">
-            Generate professional emails to brokers about load status
-          </CardDescription>
+    <div className="space-y-6">
+      <div className="flex items-center gap-2">
+        <Badge variant="secondary">AI-Powered</Badge>
+        <span className="text-sm text-muted-foreground">Generate communications for Load {load.id}</span>
+      </div>
+
+      {/* Broker Email Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Mail className="h-5 w-5" />
+            Broker Email
+          </CardTitle>
+          <CardDescription>Generate a professional email to send to the broker</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Button
-            onClick={generateBrokerEmail}
-            disabled={isGeneratingEmail}
-            className="bg-blue-600 hover:bg-blue-700 text-white"
-          >
+          <Button onClick={generateBrokerEmail} disabled={isGeneratingEmail} className="w-full">
             {isGeneratingEmail ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -142,13 +117,13 @@ export function AICommunicationPanel({ load }: AICommunicationPanelProps) {
             ) : (
               <>
                 <Mail className="mr-2 h-4 w-4" />
-                Test Email Generation
+                Generate Broker Email
               </>
             )}
           </Button>
 
           {brokerEmail && (
-            <div className="space-y-2 mt-4">
+            <div className="space-y-2">
               <Textarea
                 value={brokerEmail}
                 onChange={(e) => setBrokerEmail(e.target.value)}
@@ -164,18 +139,17 @@ export function AICommunicationPanel({ load }: AICommunicationPanelProps) {
         </CardContent>
       </Card>
 
-      {/* Driver Instructions Card */}
-      <Card className="border border-gray-200">
-        <CardHeader className="pb-4">
-          <CardTitle className="text-xl font-semibold text-gray-900">Driver Instructions</CardTitle>
-          <CardDescription className="text-gray-600">Generate detailed instructions for drivers</CardDescription>
+      {/* Driver Instructions Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            Driver Instructions
+          </CardTitle>
+          <CardDescription>Generate clear instructions for the assigned driver</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Button
-            onClick={generateDriverInstructions}
-            disabled={isGeneratingInstructions}
-            className="bg-blue-600 hover:bg-blue-700 text-white"
-          >
+          <Button onClick={generateDriverInstructions} disabled={isGeneratingInstructions} className="w-full">
             {isGeneratingInstructions ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -183,14 +157,14 @@ export function AICommunicationPanel({ load }: AICommunicationPanelProps) {
               </>
             ) : (
               <>
-                <MapPin className="mr-2 h-4 w-4" />
-                Test Instructions
+                <FileText className="mr-2 h-4 w-4" />
+                Generate Driver Instructions
               </>
             )}
           </Button>
 
           {driverInstructions && (
-            <div className="space-y-2 mt-4">
+            <div className="space-y-2">
               <Textarea
                 value={driverInstructions}
                 onChange={(e) => setDriverInstructions(e.target.value)}

@@ -16,7 +16,6 @@ import {
 import { Bell, LogOut, MessageSquare, Search, Settings, User } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import Link from "next/link"
 
 export function Header() {
   const { user, logout } = useAuth()
@@ -45,12 +44,9 @@ export function Header() {
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-background px-4 md:px-6">
       <div className="flex items-center gap-2">
-        <Link
-          href="https://ultra21.com/"
-          className="text-2xl font-black bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent tracking-tight hover:opacity-80 transition-opacity"
-        >
+        <h1 className="text-2xl font-black bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent tracking-tight">
           Ultra21
-        </Link>
+        </h1>
       </div>
       <div className="relative ml-4 flex-1 md:grow-0 md:basis-1/3">
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
